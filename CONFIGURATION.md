@@ -294,8 +294,13 @@ exclusively. Without a pin it is the last automatic fallback on ordinary hosts;
 Grok Bot's official-only default chain is unchanged. Public search needs only
 the provider key, never an X login or cookies. Supports topic, author, and mention
 searches with date windows, engagement metrics, deduplication, and bounded cursor
-pagination (at most five pages per query; each page may be billed). Partial
-results survive provider failures. Doctor reports key presence, not live account
+pagination. Each topic query runs two product lanes — `Latest` (chronological)
+and `Top` (engagement-ranked), splitting the depth budget between them — and each
+lane pages up to ten requests by default (`LAST30DAYS_GETXAPI_MAX_PAGES`
+overrides; each page may be billed). Lane-local exhaustion (page limit or a
+stuck cursor) ends only that lane; auth, rate-limit, and transport failures halt
+all remaining GetXAPI spend for the run. Partial results survive provider
+failures. Doctor reports key presence, not live account
 health. This fork is at `DevelopIQ-ai/last30days-skill`; install with
 `npx skills add DevelopIQ-ai/last30days-skill -g`.
 

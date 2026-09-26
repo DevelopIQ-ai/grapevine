@@ -10,10 +10,22 @@ from . import http, xquik
 from .x_api import is_own_post
 
 BASE_URL = "https://api.getxapi.com/twitter/tweet/advanced_search"
-MAX_PAGES = 5
+DEFAULT_MAX_PAGES = 10
+# Each topic query fans out to both GetXAPI product lanes: Latest (chronological
+# firehose) and Top (engagement-ranked). Top surfaces high-signal posts that sit
+# outside the recent tail Latest returns.
+TOPIC_PRODUCTS = ("Latest", "Top")
 
 
-def _search(query, from_date, to_date, token, limit, topic, prefix="GX"):
+def _max_pages():
+    """Per-lane page budget; LAST30DAYS_GETXAPI_MAX_PAGES overrides."""
+    try:
+        return max(1, int(os.environ.get("LAST30DAYS_GETXAPI_MAX_PAGES", "")))
+    except ValueError:
+        return DEFAULT_MAX_PAGES
+
+
+def _search(query, from_date, to_date, token, limit, topic, product="Latest", prefix="GX"):
     """Bound page spend, preserve partial evidence, and never echo provider errors."""
     items, seen_ids, seen_cursors = [], set(), set()
     cursor = None
@@ -21,8 +33,8 @@ def _search(query, from_date, to_date, token, limit, topic, prefix="GX"):
     query = re.sub(r"\b(?:since|until):\S+", "", query).strip()
     # Engine dates are inclusive; X until: is exclusive. Include the final day.
     until = (date.fromisoformat(to_date) + timedelta(days=1)).isoformat()
-    params = {"q": f"{query} since:{from_date} until:{until}", "product": "Latest"}
-    for _ in range(MAX_PAGES):
+    params = {"q": f"{query} since:{from_date} until:{until}", "product": product}
+    for _ in range(_max_pages()):
         if cursor:
             params["cursor"] = cursor
         try:
@@ -68,6 +80,12 @@ def _search(query, from_date, to_date, token, limit, topic, prefix="GX"):
     return items, "GetXAPI page limit reached; partial results"
 
 
+def _is_fatal(error):
+    """Fatal errors (auth, rate-limit, transport, schema) halt all further spend.
+    Lane-local exhaustion — page limit or a stuck cursor — only ends that lane."""
+    return "page limit" not in error and "pagination" not in error
+
+
 def search_x(topic, from_date, to_date, depth="default", token=""):
     """Search topics with upstream query expansion and depth-dependent limits."""
     if not token:
@@ -75,16 +93,22 @@ def search_x(topic, from_date, to_date, depth="default", token=""):
     cfg = xquik.DEPTH_CONFIG.get(depth, xquik.DEPTH_CONFIG["default"])
     items, seen, errors = [], set(), []
     queries = [topic] if os.environ.get('LAST30DAYS_GETXAPI_EXACT_QUERY') == '1' else xquik.expand_xquik_queries(topic, depth)
+    # Split each query's item budget across the Latest and Top product lanes.
+    per_product_limit = max(1, -(-cfg['limit'] // len(TOPIC_PRODUCTS)))
     for query in queries:
-        found, error = _search(query, from_date, to_date, token, cfg['limit'], topic)
-        for item in found:
-            if item['post_id'] not in seen:
-                seen.add(item['post_id'])
-                item['id'] = f"GX{len(items) + 1}"
-                items.append(item)
-        if error:
-            errors.append(error)
-            break  # Do not spend more after auth, rate-limit, or transport failure.
+        for product in TOPIC_PRODUCTS:
+            found, error = _search(query, from_date, to_date, token,
+                                   per_product_limit, topic, product=product)
+            for item in found:
+                if item['post_id'] not in seen:
+                    seen.add(item['post_id'])
+                    item['id'] = f"GX{len(items) + 1}"
+                    items.append(item)
+            if error:
+                errors.append(error)
+                if _is_fatal(error):
+                    # Do not spend more after auth, rate-limit, or transport failure.
+                    return {"items": items, "error": "; ".join(errors)}
     return {"items": items, **({"error": "; ".join(errors)} if errors else {})}
 
 

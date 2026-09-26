@@ -696,6 +696,9 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         # resolved above via openai_auth).
         ('GROQ_API_KEY', None),
         ('LAST30DAYS_YT_SUB_LANGS', 'en,es,pt'),
+        # getxapi reads this lazily from os.environ; unset falls back to the
+        # module's ten-page-per-lane default.
+        ('LAST30DAYS_GETXAPI_MAX_PAGES', None),
         # youtube_yt reads this lazily from os.environ; default android is
         # applied there when the key is absent. Empty disables.
         ('LAST30DAYS_YT_PLAYER_CLIENT', None),
@@ -748,6 +751,7 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         'LAST30DAYS_YT_SEARCH_TIMEOUT',
         'LAST30DAYS_REDDIT_KEYLESS_RATE',
         'LAST30DAYS_YT_PLAYER_CLIENT',
+        'LAST30DAYS_GETXAPI_MAX_PAGES',
     ):
         value = config.get(key)
         # Empty LAST30DAYS_YT_PLAYER_CLIENT is a valid disable; other knobs
