@@ -156,7 +156,13 @@ When the user has a GetXAPI key, use the `GETXAPI_KEY` environment variable or
 existing private `~/.config/last30days/.env` entry. Pin
 `LAST30DAYS_X_BACKEND=getxapi` for GetXAPI-only X research. This supports ordinary
 topic searches and FROM/ABOUT person searches using public posts and engagement
-metrics. No X session cookie is needed. Do not ask for browser login when this
+metrics. Topic queries fan out to both GetXAPI product lanes — `Latest`
+(chronological) and `Top` (engagement-ranked) — and each lane pages deeper than
+upstream defaults (ten requests; `LAST30DAYS_GETXAPI_MAX_PAGES` overrides), so
+GetXAPI spend is roughly 2x the upstream lane but still cents per run. When a
+run surfaces a breakout post, handle, or subtheme, prefer a second engine pass
+with chase subqueries over widening the first plan — iteration beats breadth.
+No X session cookie is needed. Do not ask for browser login when this
 backend is selected. Never print a key. Run doctor to verify configuration;
 key presence is not proof of a funded, working account. Normal `/last30days`
 invocation and result formatting stay unchanged. Use this fork's install source

@@ -1,0 +1,1 @@
+GetXAPI topic search now queries both the 'Latest' and 'Top' product lanes per query (splitting the depth budget across them) and pages up to ten requests per lane by default via the new 'LAST30DAYS_GETXAPI_MAX_PAGES' override; lane-local pagination exhaustion no longer blocks the sibling lane, while auth/rate-limit/transport failures still halt all further spend.

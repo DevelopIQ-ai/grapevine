@@ -36,8 +36,11 @@ def test_repeated_cursor_stops():
     page = {'tweets': [tweet()], 'has_more': True, 'next_cursor': 'same'}
     with patch.object(http, 'get', return_value=page) as call:
         result = getxapi.search_x('agents', '2026-08-19', '2026-09-19', depth='quick', token='dummy')
-    assert call.call_count == 2
-    assert result['error']
+    # A stuck cursor ends the Latest lane but does not block the Top lane.
+    assert call.call_count == 4
+    assert result['error'].count('repeated cursor') == 2
+    products = [parse_qs(urlparse(c.args[0]).query)['product'][0] for c in call.call_args_list]
+    assert products == ['Latest', 'Latest', 'Top', 'Top']
 
 
 def test_empty_and_missing_key():
@@ -83,11 +86,41 @@ def test_window_and_invalid_identity():
     assert [i['post_id'] for i in result['items']] == ['123']
 
 
-def test_page_budget():
-    pages = [{'tweets': [], 'has_more': True, 'next_cursor': str(i)} for i in range(5)]
+def test_page_budget(monkeypatch):
+    monkeypatch.setenv('LAST30DAYS_GETXAPI_MAX_PAGES', '5')
+    pages = [{'tweets': [], 'has_more': True, 'next_cursor': str(i)} for i in range(10)]
     with patch.object(http, 'get', side_effect=pages) as call:
         result = getxapi.search_x('agents', '2026-08-19', '2026-09-19', token='dummy')
-    assert call.call_count == 5 and 'page limit' in result['error']
+    # The five-page cap applies per product lane, so Latest and Top each spend five.
+    assert call.call_count == 10 and result['error'].count('page limit') == 2
+
+
+def test_default_page_budget_is_deeper(monkeypatch):
+    monkeypatch.delenv('LAST30DAYS_GETXAPI_MAX_PAGES', raising=False)
+    pages = [{'tweets': [], 'has_more': True, 'next_cursor': str(i)} for i in range(20)]
+    with patch.object(http, 'get', side_effect=pages) as call:
+        result = getxapi.search_x('agents', '2026-08-19', '2026-09-19', token='dummy')
+    assert call.call_count == 20 and result['error'].count('page limit') == 2
+
+
+def test_top_lane_adds_ranked_results():
+    def respond(url, **kwargs):
+        product = parse_qs(urlparse(url).query)['product'][0]
+        if product == 'Latest':
+            return {'tweets': [tweet()], 'has_more': False}
+        return {'tweets': [tweet(), tweet('999', 'carol')], 'has_more': False}
+
+    with patch.object(http, 'get', side_effect=respond) as call:
+        result = getxapi.search_x('agents', '2026-08-19', '2026-09-19', depth='quick', token='dummy')
+    assert call.call_count == 2
+    assert [i['post_id'] for i in result['items']] == ['123', '999']
+
+
+def test_fatal_error_halts_all_lanes():
+    with patch.object(http, 'get', side_effect=http.HTTPError('nope', status_code=429)) as call:
+        result = getxapi.search_x('agents', '2026-08-19', '2026-09-19', token='dummy')
+    assert call.call_count == 1
+    assert '429' in result['error']
 
 
 def test_key_is_loaded(monkeypatch):
