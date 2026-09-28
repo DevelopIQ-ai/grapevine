@@ -396,7 +396,10 @@ def prune_low_relevance(
         # on-topic by a stronger signal than lexical overlap — don't re-prune
         # them for missing keywords (that's exactly the miss mode Jev exists
         # to catch).
-        if item.metadata.get("jev_score") is not None:
+        if (
+            item.metadata.get("jev_score") is not None
+            or item.metadata.get("jev_unclassified")
+        ):
             return True
         # YouTube items with successfully extracted transcripts should not
         # be pruned by title-only relevance scoring — the transcript content

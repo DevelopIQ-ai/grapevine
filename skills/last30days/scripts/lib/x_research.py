@@ -732,7 +732,9 @@ def _classify_round(items, jev, objective, stats, warnings, timeout):
         except discovery_providers.ProviderError as exc:
             warnings.append(f"Dig classifier degraded: {exc}"
                             " (keeping remaining items unclassified)")
-            kept.extend(items[idx:])
+            for remaining in items[idx:]:
+                remaining["jev_unclassified"] = True
+                kept.append(remaining)
             break
         score = judgement["probabilities"].get("c0", 0.0)
         sufficient = judgement.get("evidence_sufficient", 0.0)

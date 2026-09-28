@@ -293,7 +293,9 @@ def _diversify_pool(
     # pool cutoff, so broad dig retrieval can't be silently truncated.
     for c in fused:
         if c.candidate_id not in protected_ids and any(
-            si.metadata.get("jev_score") is not None for si in c.source_items
+            si.metadata.get("jev_score") is not None
+            or si.metadata.get("jev_unclassified")
+            for si in c.source_items
         ):
             protected.append(c)
             protected_ids.add(c.candidate_id)

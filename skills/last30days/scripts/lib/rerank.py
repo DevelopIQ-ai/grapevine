@@ -796,6 +796,7 @@ def prune_fallback_entity_misses(
         # merely omits the entity name.
         if any(
             si.metadata.get("jev_score") is not None
+            or si.metadata.get("jev_unclassified")
             for si in candidate.source_items
         ):
             kept.append(candidate)

@@ -162,46 +162,22 @@ upstream defaults (ten requests; `LAST30DAYS_GETXAPI_MAX_PAGES` overrides), so
 GetXAPI spend is roughly 2x the upstream lane but still cents per run. When a
 run surfaces a breakout post, handle, or subtheme, prefer a second engine pass
 with chase subqueries over widening the first plan — iteration beats breadth.
-For "dig deep / find everything" asks, pass `--x-dig` (or `--x-dig N` for
-N rounds): after the first retrieval a planner reviews interim hits and issues
-follow-up queries that chase what surfaced — alternate phrasings, named
-entities, and `from:`/`@` lanes for recurring voices on X, broad product and
-project names on Hacker News (keyless Algolia) and the web backend — merged
-under `x-dig` / `hn-dig` / `web-dig` subquery labels. Deep runs get 2 dig
-rounds by default; it needs a planner key (`AI_GATEWAY_API_KEY` or
-`OPENAI_API_KEY`) and silently skips when absent.
-`LAST30DAYS_X_DIG_SOURCES` narrows which lanes dig (default all three) and
-`LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3). Each round
-also fires deterministic seed queries mined from the hits so far — recurring
-capitalized names across *every* lane's corpus plus the topic's own proper
-names — so planner phrasing can't gate whole vendors, and recurring voices on
-X get `from:` account-seed queries (`LAST30DAYS_X_DIG_SEEDS`, default 3/round,
-0 disables). Dig queries go broad on purpose — every retrieved item is relevance-classified by Jev
-before merging, so off-topic hits are dropped (`LAST30DAYS_X_DIG_JEV=0` turns
-the filter off). Whatever Jev keeps then goes through a second-stage Judge —
-a small chat model (`DISCOVERY_JUDGE_MODEL`, default gpt-4.1-mini) that scores
-every survivor 0-100 in batched calls and drops anything under 50 as thin,
-spammy, or redundant (`LAST30DAYS_X_DIG_JUDGE=0` turns it off; a judge outage
-fails open and keeps the batch). Jev-passed posts are also exempt from the
-lexical relevance floor and the ranked-pool cap, so a classifier-approved
-post can't be cut by weaker downstream filters. Kept items carry `jev_score`
-and `judge_score` in metadata.
-
-**Effort modes.** `--effort low|normal|high|ultra` is the depth dial the model
-translates from user intent: low = `--quick`, normal = default, high = `--deep`,
-and **ultra** = deep plus maximum dig fan-out — 5 dig rounds by default, 5
-follow-up queries per round, 40-page GetXAPI lanes, and the widest candidate
-pool (30 per-stream / 120 ranked). Use ultra for "find everything / don't miss
-anything / I don't care about cost" asks; it spends more API calls and more
-wall-clock than deep. Explicit env pins (`LAST30DAYS_X_DIG_QUERIES`,
-`LAST30DAYS_GETXAPI_MAX_PAGES`, `--x-dig N`) still override the ultra defaults.
-
-**Spend hard stop.** `--max-calls N` (or `LAST30DAYS_MAX_X_CALLS`) caps the
-GetXAPI calls a single run may make — every call is ~$0.001, so
-`--max-calls 500` ≈ $0.50 worst-case X spend for that run. Once the counter
-hits the cap every X lane and dig round short-circuits; other sources keep
-running. For "don't spend more than $X" asks, translate dollars to calls
-(1 call = $0.001) and pass the flag.
+For "dig deep / find everything" asks, pass `--x-dig` (or `--x-dig N`):
+each round a planner reviews interim hits and fires follow-ups on X
+(`from:`/`@` lanes), Hacker News (keyless Algolia), and the web
+backend, plus seed queries mined across lanes (recurring names, topic
+proper names, `from:` author seeds on X; `LAST30DAYS_X_DIG_SEEDS` 3).
+Results merge under `x-dig`/`hn-dig`/`web-dig`; deep runs dig 2 rounds
+by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
+`LAST30DAYS_X_DIG_SOURCES` narrows lanes and
+`LAST30DAYS_X_DIG_QUERIES` retunes follow-ups. Every item is Jev-classified
+(`LAST30DAYS_X_DIG_JEV=0` off), then a second Judge scores survivors
+0-100 and drops <50 (`LAST30DAYS_X_DIG_JUDGE=0` off,
+`DISCOVERY_JUDGE_*` retargets; outages keep items `jev_unclassified`).
+Judged items skip the lexical floor and pool cap, carrying `jev_score`/
+`judge_score` in metadata. **Effort:** `--effort low|normal|high|ultra`
+= `--quick`/default/`--deep`/max fan-out. **Spend:** `--max-calls N`/
+`LAST30DAYS_MAX_X_CALLS` caps run GetXAPI calls; at cap X lanes stop.
 Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
 default 800) plus a five-minute latch after any provider 429, and a cross-run
 ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts

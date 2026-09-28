@@ -358,6 +358,8 @@ def _dig_metadata(item: dict[str, Any]) -> dict[str, Any]:
         metadata["dig_round"] = item["dig_round"]
     if item.get("jev_score") is not None:
         metadata["jev_score"] = item["jev_score"]
+    if item.get("jev_unclassified"):
+        metadata["jev_unclassified"] = True
     if item.get("judge_score") is not None:
         metadata["judge_score"] = item["judge_score"]
     return metadata
