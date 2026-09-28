@@ -168,7 +168,10 @@ follow-up GetXAPI queries that chase what surfaced — alternate phrasings, name
 entities, and `from:`/`@` lanes for recurring voices — merged under an `x-dig`
 subquery label. Deep runs get 2 dig rounds by default; it needs a planner key
 (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and silently skips when absent.
-`LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3).
+`LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3). Dig queries
+go broad on purpose — every retrieved post is relevance-classified by Jev
+before merging, so off-topic hits are dropped (`LAST30DAYS_X_DIG_JEV=0` turns
+the filter off).
 Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
 default 800) plus a five-minute latch after any provider 429, and a cross-run
 ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts

@@ -23,6 +23,9 @@ def _isolated_state_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("LAST30DAYS_X_LEDGER_MAX_QUERIES", raising=False)
     monkeypatch.delenv("LAST30DAYS_X_LEDGER_MAX_IDS", raising=False)
     monkeypatch.delenv("LAST30DAYS_X_DIG_QUERIES", raising=False)
+    # Dig tests swap in fake classifiers explicitly; keep Jev off by default
+    # so a stray real API key in the environment can't trigger network calls.
+    monkeypatch.setenv("LAST30DAYS_X_DIG_JEV", "0")
     yield
 
 
@@ -257,6 +260,63 @@ def test_dig_queries_per_round_from_env(tmp_path, monkeypatch):
         )
     assert stats["queries_run"] == 2  # 4 offered, capped at env knob
     assert mock.call_count == 2
+
+
+def test_dig_jev_classifies_and_drops_irrelevant(tmp_path, monkeypatch):
+    class FakeJev:
+        def __init__(self, environ=None):
+            pass
+
+        def classify(self, objective, criteria, candidate, timeout):
+            text = candidate.get("text", "")
+            relevant = "on-topic" in text
+            return {"probabilities": {"c0": 0.9 if relevant else 0.05},
+                    "evidence_sufficient": 0.9, "usage": {}, "model": "fake"}
+
+    monkeypatch.setenv("LAST30DAYS_X_DIG_JEV", "1")
+    monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
+    monkeypatch.setattr(discovery_providers, "Jev", FakeJev)
+    dig_page = {"items": [
+        {"post_id": "9", "url": "https://x.com/b/9", "text": "on-topic new"},
+        {"post_id": "8", "url": "https://x.com/c/8", "text": "crypto spam"},
+    ]}
+    with patch.object(getxapi, "search_exact", return_value=dig_page):
+        items, warnings, stats = x_research.dig(
+            "AI agents", [], ["AI agents"],
+            from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+            token="dummy", rounds=2,
+        )
+    assert stats["jev_rejected"] == 1
+    assert [i["post_id"] for i in items] == ["9"]
+    assert items[0]["jev_score"] == 0.9
+    assert warnings == []
+
+
+def test_dig_jev_fail_open_on_provider_error(tmp_path, monkeypatch):
+    class BrokenJev:
+        def __init__(self, environ=None):
+            pass
+
+        def classify(self, objective, criteria, candidate, timeout):
+            raise discovery_providers.ProviderError("down")
+
+    monkeypatch.setenv("LAST30DAYS_X_DIG_JEV", "1")
+    monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
+    monkeypatch.setattr(discovery_providers, "Jev", BrokenJev)
+    dig_page = {"items": [
+        {"post_id": "9", "url": "https://x.com/b/9", "text": "new"},
+        {"post_id": "8", "url": "https://x.com/c/8", "text": "also new"},
+    ]}
+    with patch.object(getxapi, "search_exact", return_value=dig_page):
+        items, warnings, stats = x_research.dig(
+            "AI agents", [], ["AI agents"],
+            from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+            token="dummy", rounds=1,
+        )
+    # both new items kept when the classifier is down (post ids dedupe across
+    # the round's two queries, so 2 unique items reach the classifier)
+    assert stats["new_items"] == 2
+    assert any("classifier degraded" in w for w in warnings)
 
 
 def test_dig_stops_on_gate(tmp_path, monkeypatch):

@@ -320,11 +320,15 @@ def _dig_feedback(
         "rounds": [{"number": i + 1} for i in range(round_no)],
         "context_note": (
             "Iterative X dig: queries run through GetXAPI advanced search "
-            "(Latest and Top lanes). Suggest pivots that surface posts the "
-            "existing queries missed — alternate phrasings, sub-events, named "
-            "entities, or from:handle / @handle lanes for recurring voices. "
-            "X search supports from:, @handle, \"exact phrase\", and plain "
-            "keywords; since:/until: dates are applied by the engine."
+            "(Latest and Top lanes). Every retrieved post is scored for "
+            "relevance by a downstream classifier, so favor broad retrieval "
+            "— single terms, product/vendor names, category words — over "
+            "multi-keyword constructions; search engines AND terms, and a "
+            "missing synonym means a total miss. Good pivots: bare entity or "
+            "product names, alternate phrasings, sub-events, or "
+            "from:handle / @handle lanes for recurring voices. X search "
+            "supports from:, @handle, \"exact phrase\", and plain keywords; "
+            "since:/until: dates are applied by the engine."
         ),
     }
 
@@ -355,19 +359,29 @@ def dig(
     from . import discovery_providers, getxapi
 
     warnings: list[str] = []
-    stats = {"rounds_run": 0, "queries_run": 0, "new_items": 0}
+    stats = {"rounds_run": 0, "queries_run": 0, "new_items": 0,
+             "jev_rejected": 0}
     if rounds <= 0 or not token:
         return [], warnings, stats
+    env_map = os.environ if environ is None else environ
     try:
         planner = discovery_providers.Planner(environ)
     except discovery_providers.ProviderError as exc:
         warnings.append(f"X dig skipped: {exc}")
         return [], warnings, stats
 
+    jev = None
+    if str(env_map.get("LAST30DAYS_X_DIG_JEV") or "1") != "0":
+        try:
+            jev = discovery_providers.Jev(environ)
+        except discovery_providers.ProviderError:
+            jev = None
+
     objective = (
         f"X/Twitter posts relevant to: {topic}. Surface posts that the queries "
-        "already tried did not reach — alternate phrasings, specific sub-topics, "
-        "named entities, or from:handle/@handle lanes for voices that recur."
+        "already tried did not reach — broad single-term and entity-name "
+        "queries are safe because every candidate is relevance-classified "
+        "downstream; keyword stuffing hides posts whose wording differs."
     )
     filters = {"source": "x", "from": from_date, "to": to_date}
     seen_post_ids = {
@@ -382,7 +396,6 @@ def dig(
     }
     tried = list(tried_queries)
     tried_norm = {normalize_query(q) for q in tried}
-    env_map = os.environ if environ is None else environ
     queries_per_round = max(
         1, _map_int(env_map, "LAST30DAYS_X_DIG_QUERIES", DIG_QUERIES_PER_ROUND)
     )
@@ -410,6 +423,7 @@ def dig(
         if decision.get("action") != "search":
             break
         produced = False
+        round_items: list[dict] = []
         for query in (decision.get("queries") or [])[:queries_per_round]:
             if normalize_query(query) in tried_norm:
                 continue
@@ -434,9 +448,49 @@ def dig(
                 if url:
                     seen_urls.add(url)
                 item["dig_round"] = round_no + 1
-                new_items.append(item)
+                round_items.append(item)
         if not produced:
             # Planner asked for queries but all were repeats — treat as done.
             break
+        new_items.extend(_classify_round(round_items, jev, objective,
+                                       stats, warnings, timeout))
     stats["new_items"] = len(new_items)
     return new_items, warnings, stats
+
+
+# Jev reject/evidence bands, mirroring discovery.py's defaults.
+JEV_REJECT = 0.2
+JEV_EVIDENCE = 0.8
+
+
+def _classify_round(items, jev, objective, stats, warnings, timeout):
+    """Relevance-classify one dig round; rejected candidates are dropped.
+
+    Broad queries only stay safe because this filter exists. Fail-open on
+    provider errors: an unclassifiable batch is kept rather than silently
+    emptied.
+    """
+    if not jev or not items:
+        return items
+    from . import discovery_providers
+    kept = []
+    for idx, item in enumerate(items):
+        try:
+            judgement = jev.classify(objective, [objective], {
+                "text": str(item.get("text") or item.get("body") or "")[:2000],
+                "author": str(item.get("author_handle") or item.get("author") or ""),
+                "url": str(item.get("url") or ""),
+            }, timeout)
+        except discovery_providers.ProviderError as exc:
+            warnings.append(f"X dig classifier degraded: {exc}"
+                            " (keeping remaining items unclassified)")
+            kept.extend(items[idx:])
+            break
+        score = judgement["probabilities"].get("c0", 0.0)
+        sufficient = judgement.get("evidence_sufficient", 0.0)
+        item["jev_score"] = round(score, 3)
+        if sufficient >= JEV_EVIDENCE and score <= JEV_REJECT:
+            stats["jev_rejected"] += 1
+            continue
+        kept.append(item)
+    return kept

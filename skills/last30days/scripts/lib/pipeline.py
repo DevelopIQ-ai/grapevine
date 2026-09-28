@@ -4176,6 +4176,7 @@ def _run_supplemental_searches(
                         "rounds": dig_stats.get("rounds_run", 0),
                         "queries": dig_stats.get("queries_run", 0),
                         "new_items": dig_stats.get("new_items", 0),
+                        "jev_rejected": dig_stats.get("jev_rejected", 0),
                     }
                 if dig_items:
                     normalized = _normalize_score_dedupe(
@@ -4206,9 +4207,11 @@ def _run_supplemental_searches(
                         for item in normalized:
                             if item.url:
                                 existing_urls.add(item.url)
+                        rejected = dig_stats.get("jev_rejected", 0)
                         print(
                             f"[X dig] {dig_stats.get('queries_run', 0)} follow-up "
-                            f"queries surfaced {len(normalized)} new posts",
+                            f"queries surfaced {len(normalized)} new posts"
+                            + (f" ({rejected} rejected as off-topic)" if rejected else ""),
                             file=sys.stderr,
                         )
             except Exception as exc:

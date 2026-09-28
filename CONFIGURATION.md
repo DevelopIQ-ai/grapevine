@@ -322,14 +322,19 @@ researcher) ride on every GetXAPI call:
   query); `0` lifts either cap.
 - **LLM-steered dig (`--x-dig N`)** — after initial X retrieval, the discovery
   planner reviews the interim corpus and issues up to 3 follow-up GetXAPI
-  queries per round (alternate phrasings, named entities, `from:`/`@` lanes for
-  recurring voices), for N rounds; `LAST30DAYS_X_DIG_QUERIES` retunes the
-  per-round count. Follow-ups merge under an `x-dig` subquery
+  queries per round, for N rounds; `LAST30DAYS_X_DIG_QUERIES` retunes the
+  per-round count. Dig favors broad retrieval (bare entity names, category
+  terms) over multi-keyword queries because every retrieved post is
+  relevance-classified by Jev before merging — off-topic candidates are
+  dropped rather than ranked; `LAST30DAYS_X_DIG_JEV=0` disables that
+  classification pass (falls back to keep-everything when no Jev key is
+  configured). Follow-ups merge under an `x-dig` subquery
   label and honor the gate and ledger. Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
   disables. Author name, bio, followers, and location from each post's author
-  object now flow into item metadata for lead-flavored research.
+  object now flow into item metadata for lead-flavored research, and kept
+  posts carry a `jev_score` field when classification ran.
 
 **`LAST30DAYS_GETXAPI_EXACT_QUERY=1`** — process-environment opt-in that sends a
 generated query unchanged to GetXAPI rather than extracting and expanding topic

@@ -707,6 +707,7 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         # call budget (0 disables the budget, not the latch).
         ('LAST30DAYS_X_DIG_ROUNDS', None),
         ('LAST30DAYS_X_DIG_QUERIES', None),
+        ('LAST30DAYS_X_DIG_JEV', None),
         ('LAST30DAYS_X_LEDGER', None),
         ('LAST30DAYS_X_LEDGER_MAX_QUERIES', None),
         ('LAST30DAYS_X_LEDGER_MAX_IDS', None),
@@ -766,6 +767,7 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         'LAST30DAYS_GETXAPI_MAX_PAGES',
         'LAST30DAYS_X_DIG_ROUNDS',
         'LAST30DAYS_X_DIG_QUERIES',
+        'LAST30DAYS_X_DIG_JEV',
         'LAST30DAYS_X_LEDGER',
         'LAST30DAYS_X_LEDGER_MAX_QUERIES',
         'LAST30DAYS_X_LEDGER_MAX_IDS',
