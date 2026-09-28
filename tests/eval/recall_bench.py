@@ -49,6 +49,7 @@ def _haystack(item: dict) -> str:
         str(item.get("author_handle") or ""),
         str(item.get("author") or ""),
         str(item.get("post_id") or ""),
+        str(item.get("item_id") or ""),
     ]
     return "\n".join(parts).lower()
 

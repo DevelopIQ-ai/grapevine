@@ -4187,7 +4187,7 @@ def _run_supplemental_searches(
                 seed_corpus = [
                     {
                         "title": it.title or "",
-                        "text": it.body or "",
+                        "text": it.body or it.snippet or "",
                         "author_handle": it.author or "",
                     }
                     for items in bundle.items_by_source.values()
@@ -4541,7 +4541,7 @@ def _run_multi_source_dig(
     seed_corpus = [
         {
             "title": it.title or "",
-            "text": it.body or "",
+            "text": it.body or it.snippet or "",
             "author": it.author or "",
         }
         for items in bundle.items_by_source.values()
