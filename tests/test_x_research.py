@@ -225,6 +225,7 @@ class FakePlanner:
 
 
 def test_dig_runs_followups_and_dedupes(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_DIG_SEEDS", "0")
     interim = [{"post_id": "1", "text": "hit", "url": "https://x.com/a/status/1",
                 "author_handle": "a"}]
     monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
@@ -261,6 +262,7 @@ def test_dig_queries_per_round_from_env(tmp_path, monkeypatch):
                     "coverage_summary": "covered", "queries": [], "usage": {}}
 
     monkeypatch.setenv("LAST30DAYS_X_DIG_QUERIES", "2")
+    monkeypatch.setenv("LAST30DAYS_X_DIG_SEEDS", "0")
     monkeypatch.setattr(discovery_providers, "Planner", ManyQueriesPlanner)
     dig_page = {"items": [{"post_id": "9", "url": "https://x.com/b/9",
                            "text": "new"}]}
@@ -391,6 +393,7 @@ def _hn_items():
 
 
 def test_dig_source_runs_queries_dedupes_and_tags_round(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_DIG_SEEDS", "0")
     monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
     interim = [{"id": "hn1", "url": "https://s.io"}]
     calls = []
@@ -448,6 +451,29 @@ def test_dig_source_jev_drops_off_topic(tmp_path, monkeypatch):
     assert [i["id"] for i in items] == ["w1"]
     assert items[0]["jev_score"] == 0.9
     assert stats["jev_rejected"] >= 1
+
+
+def test_dig_source_seeds_mine_entity_names(tmp_path, monkeypatch):
+    monkeypatch.delenv("LAST30DAYS_X_DIG_SEEDS", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    interim = [
+        {"id": "a", "title": "Prime Sandboxes goes GA", "url": "https://p.io"},
+        {"id": "b", "title": "Prime Sandboxes vs Edera compared",
+         "url": "https://e.io"},
+    ]
+    calls = []
+
+    def search(query):
+        calls.append(query)
+        return {"items": []}
+
+    x_research.dig_source(
+        "hackernews", "sandbox launches", interim, ["sandbox"],
+        search_fn=search, rounds=1,
+    )
+    # "Prime Sandboxes" recurs across interim hits -> deterministic seed query,
+    # independent of what the planner chose to ask.
+    assert "Prime Sandboxes" in calls
 
 
 def test_dig_source_judge_drops_low_scores(tmp_path, monkeypatch):

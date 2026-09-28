@@ -326,7 +326,12 @@ researcher) ride on every GetXAPI call:
   the (keyless) Algolia index, and the web via the configured grounding
   backend; `LAST30DAYS_X_DIG_SOURCES` narrows the lane set (e.g.
   `LAST30DAYS_X_DIG_SOURCES=x` for X-only digging) and
-  `LAST30DAYS_X_DIG_QUERIES` retunes the per-round count. Dig favors broad
+  `LAST30DAYS_X_DIG_QUERIES` retunes the per-round count. Every round also
+  fires deterministic seed queries mined from the corpus — recurring
+  capitalized names in retrieved titles plus the topic's own proper names —
+  so coverage does not depend on planner phrasing;
+  `LAST30DAYS_X_DIG_SEEDS` retunes the per-round seed count (default 3,
+  `0` disables). Dig favors broad
   retrieval (bare entity names, category terms) over multi-keyword queries
   because every retrieved post is relevance-classified by Jev before merging
   — off-topic candidates are dropped rather than ranked;

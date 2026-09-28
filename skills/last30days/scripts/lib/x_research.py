@@ -16,11 +16,12 @@ import os
 import re
 import tempfile
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from . import env
+from . import entity_extract, env
 
 # ---------------------------------------------------------------------------
 # Daily capacity gate (getx-daily-usage-gate.ts port)
@@ -385,6 +386,79 @@ def _item_dedupe_keys(item: dict) -> tuple[str, str]:
     )
 
 
+# Capitalized runs in titles/text: "Prime Sandboxes", "Docker", "Edera".
+_PROPER_RUN = re.compile(
+    r"[A-Z][A-Za-z0-9.&'+-]*(?:[ \t]+[A-Z][A-Za-z0-9.&'+-]*){0,3}"
+)
+
+# Title-cased junk that survives capital-run mining but names nothing.
+_SEED_STOP = frozenset({
+    "show hn", "ask hn", "tell hn", "hn", "show", "ask", "the", "part",
+    "new", "vs", "why", "how", "what", "when", "launch", "launched",
+    "launching", "announcing", "introducing", "meet", "open source",
+})
+
+# How many mined seed queries each dig round fires before the planner adds
+# its own. LAST30DAYS_X_DIG_SEEDS overrides; 0 disables seeding.
+DIG_SEEDS_PER_ROUND = 3
+
+
+def _seed_queries(
+    topic: str,
+    items: list[dict],
+    tried_norm: set,
+    *,
+    max_seeds: int,
+) -> list[str]:
+    """Deterministic broad queries mined from the corpus so far.
+
+    The planner's phrasing is a luck surface — a run can miss a whole vendor
+    because nobody typed its name. Seeds remove the luck: every round, the
+    most frequent capitalized phrases in retrieved titles/text plus the
+    topic's own proper names become bare queries, deduped against everything
+    already tried. Jev+judge keep the noise cheap.
+    """
+    if max_seeds <= 0:
+        return []
+    counts: Counter[str] = Counter()
+    for it in items[-200:]:
+        if not isinstance(it, dict):
+            continue
+        text = " ".join(
+            str(it.get(field) or "")
+            for field in ("title", "text", "body", "snippet")
+        )[:400]
+        for match in _PROPER_RUN.finditer(text):
+            phrase = " ".join(match.group(0).split()).strip(".,:;!?-")
+            if (
+                len(phrase) < 4
+                or phrase.lower() in _SEED_STOP
+                or all(
+                    w.lower() in entity_extract.ENTITY_STOPWORDS
+                    for w in phrase.split()
+                )
+            ):
+                continue
+            counts[phrase] += 1
+    seeds: list[str] = []
+
+    def _take(phrase: str) -> None:
+        if len(seeds) >= max_seeds:
+            return
+        if normalize_query(phrase) not in tried_norm and phrase not in seeds:
+            seeds.append(phrase)
+
+    # Recurring names in hits first — strongest novelty signal.
+    for phrase, _ in counts.most_common(20):
+        _take(phrase)
+    # Then the topic's own proper names as a guaranteed floor.
+    for match in _PROPER_RUN.finditer(topic):
+        phrase = " ".join(match.group(0).split()).strip(".,:;!?-")
+        if len(phrase) >= 4 and phrase.lower() not in _SEED_STOP:
+            _take(phrase)
+    return seeds[:max_seeds]
+
+
 def dig_source(
     lane: str,
     topic: str,
@@ -461,6 +535,9 @@ def dig_source(
     queries_per_round = max(
         1, _map_int(env_map, "LAST30DAYS_X_DIG_QUERIES", DIG_QUERIES_PER_ROUND)
     )
+    seeds_per_round = max(
+        0, _map_int(env_map, "LAST30DAYS_X_DIG_SEEDS", DIG_SEEDS_PER_ROUND)
+    )
     new_items: list[dict] = []
     previous_assessment = None
 
@@ -469,28 +546,13 @@ def dig_source(
         if blocked:
             warnings.append(f"{label} dig stopped: {blocked}")
             break
-        try:
-            decision = planner.plan(
-                objective, filters,
-                _dig_feedback(topic, tried, interim_items + new_items,
-                              round_no, previous_assessment,
-                              queries_per_round,
-                              context_note=context_note
-                              or _LANE_CONTEXT_NOTES.get(lane)),
-                timeout,
-            )
-        except discovery_providers.ProviderError as exc:
-            warnings.append(f"{label} dig planner failed: {exc}")
-            break
-        previous_assessment = decision.get("coverage_summary")
-        stats["rounds_run"] = round_no + 1
-        if decision.get("action") != "search":
-            break
         produced = False
         round_items: list[dict] = []
-        for query in (decision.get("queries") or [])[:queries_per_round]:
+
+        def _run_query(query: str) -> None:
+            nonlocal produced
             if normalize_query(query) in tried_norm:
-                continue
+                return
             tried_norm.add(normalize_query(query))
             tried.append(query)
             stats["queries_run"] += 1
@@ -498,10 +560,10 @@ def dig_source(
                 result = search_fn(query)
             except Exception as exc:
                 warnings.append(f"{label} dig query {query!r}: {exc}")
-                continue
+                return
             if result.get("error") and not result.get("items"):
                 warnings.append(f"{label} dig query {query!r}: {result['error']}")
-                continue
+                return
             produced = True
             ledger_key = f"{lane}:{query}"
             known = ledger.seen_ids(ledger_key) if ledger else set()
@@ -523,8 +585,37 @@ def dig_source(
                 round_items.append(item)
             if ledger and found_ids:
                 ledger.record_page(ledger_key, lane, found_ids, None, False)
+
+        # Deterministic coverage floor: entity phrases mined from the hits
+        # so far plus the topic's own proper names — runs every round so
+        # planner phrasing luck can't gate whole categories of finds.
+        for query in _seed_queries(
+            topic, interim_items + new_items, tried_norm,
+            max_seeds=seeds_per_round,
+        ):
+            _run_query(query)
+
+        try:
+            decision = planner.plan(
+                objective, filters,
+                _dig_feedback(topic, tried, interim_items + new_items,
+                              round_no, previous_assessment,
+                              queries_per_round,
+                              context_note=context_note
+                              or _LANE_CONTEXT_NOTES.get(lane)),
+                timeout,
+            )
+        except discovery_providers.ProviderError as exc:
+            warnings.append(f"{label} dig planner failed: {exc}")
+            break
+        previous_assessment = decision.get("coverage_summary")
+        stats["rounds_run"] = round_no + 1
+        if decision.get("action") == "search":
+            for query in (decision.get("queries") or [])[:queries_per_round]:
+                _run_query(query)
         if not produced:
-            # Planner asked for queries but all were repeats — treat as done.
+            # Nothing new this round — planner stop, all-repeats, or all
+            # queries failed. Either way the trail is cold.
             break
         new_items.extend(_judge_round(
             _classify_round(round_items, jev, objective, stats, warnings,
