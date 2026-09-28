@@ -452,21 +452,31 @@ def _seed_queries(
                 authors[handle] += 1
     seeds: list[str] = []
 
-    def _take(phrase: str) -> None:
-        if len(seeds) >= max_seeds:
-            return
+    def _take(phrase: str) -> bool:
         if normalize_query(phrase) not in tried_norm and phrase not in seeds:
             seeds.append(phrase)
+            return True
+        return False
 
-    # Recurring names in hits first — strongest novelty signal.
-    for phrase, _ in counts.most_common(20):
-        _take(phrase)
-    # Recurring voices get account-scoped seeds.
+    # Recurring voices get a reserved budget — an account-scoped query catches
+    # an announcement no matter the wording, and phrase seeds shouldn't crowd
+    # them out.
     if author_prefix:
+        author_budget = min(2, max_seeds)
         for handle, _ in authors.most_common(10):
-            _take(f"{author_prefix}{handle}")
+            if author_budget <= 0:
+                break
+            if _take(f"{author_prefix}{handle}"):
+                author_budget -= 1
+    # Recurring names in hits — strongest novelty signal.
+    for phrase, _ in counts.most_common(20):
+        if len(seeds) >= max_seeds:
+            break
+        _take(phrase)
     # Then the topic's own proper names as a guaranteed floor.
     for match in _PROPER_RUN.finditer(topic):
+        if len(seeds) >= max_seeds:
+            break
         phrase = " ".join(match.group(0).split()).strip(".,:;!?-")
         if len(phrase) >= 4 and phrase.lower() not in _SEED_STOP:
             _take(phrase)
