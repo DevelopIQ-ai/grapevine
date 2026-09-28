@@ -64,7 +64,7 @@ TIER_ERROR = "error"
 # runtime behavior (brave -> exa -> serper -> parallel -> keyless floor);
 # there is no importable constant there, so this declaration is guarded by
 # the grounding-auto parity test rather than an import.
-WEB_BACKEND_ORDER: Tuple[str, ...] = ("brave", "exa", "serper", "parallel", "keyless")
+WEB_BACKEND_ORDER: Tuple[str, ...] = ("brave", "exa", "serper", "parallel", "tinyfish", "keyless")
 
 # YouTube backend order (pipeline: yt-dlp first, ScrapeCreators search
 # fallback when yt-dlp is absent or fails — see lib/pipeline.py).
@@ -484,9 +484,10 @@ _WEB_PROBES: Dict[str, Callable[[Dict[str, Any]], BackendFinding]] = {
     "exa": _key_probe("exa", "EXA_API_KEY", "EXA_API_KEY"),
     "serper": _key_probe("serper", "SERPER_API_KEY", "SERPER_API_KEY"),
     "parallel": _key_probe("parallel", "PARALLEL_API_KEY", "PARALLEL_API_KEY"),
+    "tinyfish": _key_probe("tinyfish", "TINYFISH_API_KEY", "TINYFISH_API_KEY (tinyfish.ai)"),
     "keyless": _probe_web_keyless,
 }
-_WEB_KEYED = {"brave", "exa", "serper", "parallel"}
+_WEB_KEYED = {"brave", "exa", "serper", "parallel", "tinyfish"}
 
 _SC_SPEC = BackendSpec(
     name="scrapecreators",

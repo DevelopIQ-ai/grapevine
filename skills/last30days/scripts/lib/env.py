@@ -69,7 +69,7 @@ KEYCHAIN_KEYS = (
     "TRUTHSOCIAL_TOKEN", "BRAVE_API_KEY", "EXA_API_KEY", "SERPER_API_KEY",
     "OPENROUTER_API_KEY", "PERPLEXITY_API_KEY", "PARALLEL_API_KEY", "XQUIK_API_KEY", "GETXAPI_KEY",
     "XIAOHONGSHU_API_BASE", "GITHUB_TOKEN", "BRIGHTDATA_API_KEY",
-    "X_BEARER_TOKEN",
+    "X_BEARER_TOKEN", "TINYFISH_API_KEY",
 )
 
 # pass(1) integration: Linux/Unix analog of the Keychain source. Each key in
@@ -638,6 +638,8 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         ('LAST30DAYS_PERPLEXITY_REASONING_EFFORT', None),
         ('LAST30DAYS_PERPLEXITY_DEEP_TIMEOUT_SECONDS', '600'),
         ('PARALLEL_API_KEY', None),
+        ('TINYFISH_API_KEY', None),
+        ('MCP_TINYFISH_API_KEY', None),
         ('XQUIK_API_KEY', None),
         ('GETXAPI_KEY', None),
         # Bright Data CLI. Optional: the CLI normally owns its own auth via
@@ -771,6 +773,14 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         legacy = read_secret_env('SCRAPE_CREATORS_API_KEY') or merged_env.get('SCRAPE_CREATORS_API_KEY')
         if legacy:
             config['SCRAPECREATORS_API_KEY'] = legacy
+
+    # Devin's MCP server ships the TinyFish key as MCP_TINYFISH_API_KEY; accept
+    # it as an alias so the web-search lane works on that host without a
+    # duplicate secret. Canonical TINYFISH_API_KEY wins when both are set.
+    if not config.get('TINYFISH_API_KEY'):
+        tf_legacy = read_secret_env('MCP_TINYFISH_API_KEY') or merged_env.get('MCP_TINYFISH_API_KEY')
+        if tf_legacy:
+            config['TINYFISH_API_KEY'] = tf_legacy
 
     # Multi-key rotation: comma-separated SCRAPECREATORS_API_KEY round-robins
     # via random.choice per run. Originally added in #268, accidentally dropped

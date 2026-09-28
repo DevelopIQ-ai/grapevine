@@ -22,7 +22,7 @@ _probe_cache: tuple = ("unset", "")
 DEPTH_CONFIG = {
     "quick": {"limit": 10, "queries": 1},
     "default": {"limit": 20, "queries": 2},
-    "deep": {"limit": 40, "queries": 3},
+    "deep": {"limit": 60, "queries": 4},
 }
 
 _BASE_URL = "https://xquik.com/api/v1"
@@ -46,7 +46,7 @@ def expand_xquik_queries(topic: str, depth: str) -> List[str]:
         depth: "quick", "default", or "deep"
 
     Returns:
-        List of query strings (1 for quick, 2 for default, 3 for deep).
+        List of query strings (1 for quick, 2 for default, up to 4 for deep).
     """
     core = _extract_core_subject(topic)
     # Anti-bare-generic guard (#607): never let the core collapse to a single
@@ -68,6 +68,13 @@ def expand_xquik_queries(topic: str, depth: str) -> List[str]:
         if compounds:
             or_parts = " OR ".join(f'"{t}"' for t in compounds[:3])
             queries.append(f"({or_parts})")
+
+    # Deep tier adds an exact-phrase variant: high-precision mentions of the
+    # subject as a literal string, disjoint from keyword-bag matching.
+    if depth == "deep" and len(core.split()) > 1:
+        phrase = f'"{core}"'
+        if phrase not in queries:
+            queries.append(phrase)
 
     cap = DEPTH_CONFIG.get(depth, DEPTH_CONFIG["default"])["queries"]
     return queries[:cap]
