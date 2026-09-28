@@ -20,6 +20,9 @@ def _isolated_state_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(env, "CONFIG_DIR", tmp_path)
     monkeypatch.delenv("LAST30DAYS_GETXAPI_DAILY_BUDGET", raising=False)
     monkeypatch.delenv("LAST30DAYS_X_LEDGER", raising=False)
+    monkeypatch.delenv("LAST30DAYS_X_LEDGER_MAX_QUERIES", raising=False)
+    monkeypatch.delenv("LAST30DAYS_X_LEDGER_MAX_IDS", raising=False)
+    monkeypatch.delenv("LAST30DAYS_X_DIG_QUERIES", raising=False)
     yield
 
 
@@ -103,13 +106,29 @@ def test_ledger_disabled_flag(tmp_path, monkeypatch):
 
 
 def test_ledger_evicts_oldest_queries(tmp_path, monkeypatch):
-    monkeypatch.setattr(x_research, "LEDGER_MAX_QUERIES", 3)
+    monkeypatch.setenv("LAST30DAYS_X_LEDGER_MAX_QUERIES", "3")
     ledger = x_research.Ledger()
     for i in range(5):
         ledger.record_query_run(f"q{i}")
     queries = ledger._data["queries"]
     assert len(queries) == 3
     assert "q4" in queries and "q0" not in queries
+
+
+def test_ledger_ids_cap_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_LEDGER_MAX_IDS", "3")
+    ledger = x_research.Ledger()
+    ledger.record_page("q", "Latest", ["1", "2", "3", "4", "5"], None, False)
+    assert x_research.Ledger().seen_ids("q") == {"3", "4", "5"}
+
+
+def test_ledger_caps_zero_means_unbounded(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_LEDGER_MAX_QUERIES", "0")
+    monkeypatch.setenv("LAST30DAYS_X_LEDGER_MAX_IDS", "0")
+    ledger = x_research.Ledger()
+    for i in range(6):
+        ledger.record_query_run(f"q{i}")
+    assert len(ledger._data["queries"]) == 6
 
 
 def test_normalize_query():
@@ -212,6 +231,32 @@ def test_dig_runs_followups_and_dedupes(tmp_path, monkeypatch):
     assert warnings == []
     # The planner saw interim hits in feedback.
     assert mock_exact.call_count == 2
+
+
+def test_dig_queries_per_round_from_env(tmp_path, monkeypatch):
+    class ManyQueriesPlanner(FakePlanner):
+        def plan(self, objective, filters, feedback, timeout):
+            self.calls += 1
+            self.seen_request = feedback["queries_requested"]
+            if self.calls == 1:
+                return {"action": "search", "reason": "chase",
+                        "coverage_summary": "needs more",
+                        "queries": ["q1", "q2", "q3", "q4"], "usage": {}}
+            return {"action": "stop", "reason": "done",
+                    "coverage_summary": "covered", "queries": [], "usage": {}}
+
+    monkeypatch.setenv("LAST30DAYS_X_DIG_QUERIES", "2")
+    monkeypatch.setattr(discovery_providers, "Planner", ManyQueriesPlanner)
+    dig_page = {"items": [{"post_id": "9", "url": "https://x.com/b/9",
+                           "text": "new"}]}
+    with patch.object(getxapi, "search_exact", return_value=dig_page) as mock:
+        items, _, stats = x_research.dig(
+            "AI agents", [], ["AI agents"],
+            from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+            token="dummy", rounds=2,
+        )
+    assert stats["queries_run"] == 2  # 4 offered, capped at env knob
+    assert mock.call_count == 2
 
 
 def test_dig_stops_on_gate(tmp_path, monkeypatch):

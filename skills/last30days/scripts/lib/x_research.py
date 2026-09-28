@@ -38,9 +38,13 @@ RETRY_LATCH_SECONDS = 300
 GATE_FILE = "getxapi-usage.json"
 LEDGER_FILE = "x-research-ledger.json"
 
-# Ledger bounds: keep the file small and the tail recent.
+# Ledger bounds: keep the file small and the tail recent. Both are env-tunable;
+# 0 (or a negative value) lifts the cap entirely.
 LEDGER_MAX_QUERIES = 400
 LEDGER_MAX_IDS_PER_QUERY = 2000
+
+# Follow-up queries the dig planner may issue per round.
+DIG_QUERIES_PER_ROUND = 3
 
 
 def _now() -> float:
@@ -48,8 +52,12 @@ def _now() -> float:
 
 
 def _env_int(name: str, default: int) -> int:
+    return _map_int(os.environ, name, default)
+
+
+def _map_int(env_map, name: str, default: int) -> int:
     try:
-        return int(os.environ.get(name) or "")
+        return int(env_map.get(name) or "")
     except (TypeError, ValueError):
         return default
 
@@ -91,7 +99,7 @@ def _write_json(path: Path, data: dict) -> None:
 class DailyGate:
     """Bounds GetXAPI spend per UTC day and latches provider exhaustion.
 
-    A 429 or 5xx from GetXAPI records ``retry_until``; every later call in the
+    A 429 from GetXAPI records ``retry_until``; every later call in the
     latch window short-circuits instead of spending against a saturated key.
     """
 
@@ -178,6 +186,12 @@ class Ledger:
         enabled = str(env_map.get("LAST30DAYS_X_LEDGER") or "1") != "0"
         state_dir = _state_dir() if enabled else None
         self._path = state_dir / LEDGER_FILE if state_dir else None
+        self._max_queries = _map_int(
+            env_map, "LAST30DAYS_X_LEDGER_MAX_QUERIES", LEDGER_MAX_QUERIES
+        )
+        self._max_ids = _map_int(
+            env_map, "LAST30DAYS_X_LEDGER_MAX_IDS", LEDGER_MAX_IDS_PER_QUERY
+        )
         self._data: dict[str, Any] = {"schema_version": 1, "queries": {}}
         if self._path:
             loaded = _read_json(self._path)
@@ -236,8 +250,8 @@ class Ledger:
             if pid not in known:
                 known.add(pid)
                 ids.append(pid)
-        if len(ids) > LEDGER_MAX_IDS_PER_QUERY:
-            del ids[: len(ids) - LEDGER_MAX_IDS_PER_QUERY]
+        if 0 < self._max_ids < len(ids):
+            del ids[: len(ids) - self._max_ids]
         entry.setdefault("products", {})[product] = {
             "next_cursor": next_cursor,
             "has_more": bool(has_more),
@@ -250,13 +264,15 @@ class Ledger:
 
     def _evict(self) -> None:
         queries = self._data.get("queries")
-        if not isinstance(queries, dict) or len(queries) <= LEDGER_MAX_QUERIES:
+        if self._max_queries <= 0:
+            return
+        if not isinstance(queries, dict) or len(queries) <= self._max_queries:
             return
         ordered = sorted(
             queries.items(),
             key=lambda kv: str(kv[1].get("updated_at") or ""),
         )
-        for key, _ in ordered[: len(queries) - LEDGER_MAX_QUERIES]:
+        for key, _ in ordered[: len(queries) - self._max_queries]:
             del queries[key]
 
 
@@ -292,13 +308,14 @@ def _dig_feedback(
     interim: list[dict],
     round_no: int,
     previous_assessment: str | None,
+    queries_requested: int,
 ) -> dict:
     return {
         "queries": tried[-100:],
         "total_queries": len(tried),
         "accepted_count": len(interim),
         "examples": _digest_items(interim),
-        "queries_requested": 3,
+        "queries_requested": queries_requested,
         "previous_assessment": previous_assessment,
         "rounds": [{"number": i + 1} for i in range(round_no)],
         "context_note": (
@@ -365,6 +382,10 @@ def dig(
     }
     tried = list(tried_queries)
     tried_norm = {normalize_query(q) for q in tried}
+    env_map = os.environ if environ is None else environ
+    queries_per_round = max(
+        1, _map_int(env_map, "LAST30DAYS_X_DIG_QUERIES", DIG_QUERIES_PER_ROUND)
+    )
     new_items: list[dict] = []
     previous_assessment = None
 
@@ -377,7 +398,8 @@ def dig(
             decision = planner.plan(
                 objective, filters,
                 _dig_feedback(topic, tried, interim_items + new_items,
-                              round_no, previous_assessment),
+                              round_no, previous_assessment,
+                              queries_per_round),
                 timeout,
             )
         except discovery_providers.ProviderError as exc:
@@ -388,7 +410,7 @@ def dig(
         if decision.get("action") != "search":
             break
         produced = False
-        for query in decision.get("queries") or []:
+        for query in (decision.get("queries") or [])[:queries_per_round]:
             if normalize_query(query) in tried_norm:
                 continue
             tried_norm.add(normalize_query(query))
