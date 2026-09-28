@@ -162,6 +162,17 @@ upstream defaults (ten requests; `LAST30DAYS_GETXAPI_MAX_PAGES` overrides), so
 GetXAPI spend is roughly 2x the upstream lane but still cents per run. When a
 run surfaces a breakout post, handle, or subtheme, prefer a second engine pass
 with chase subqueries over widening the first plan — iteration beats breadth.
+For "dig deep / find everything" asks on X, pass `--x-dig` (or `--x-dig N` for
+N rounds): after the first retrieval a planner reviews interim hits and issues
+follow-up GetXAPI queries that chase what surfaced — alternate phrasings, named
+entities, and `from:`/`@` lanes for recurring voices — merged under an `x-dig`
+subquery label. Deep runs get 2 dig rounds by default; it needs a planner key
+(`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and silently skips when absent.
+Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
+default 800) plus a five-minute latch after any provider 429, and a cross-run
+ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts
+as `previously_seen` so repeat digs on a topic accumulate instead of
+re-reporting the same posts (`LAST30DAYS_X_LEDGER=0` disables).
 No X session cookie is needed. Do not ask for browser login when this
 backend is selected. Never print a key. Run doctor to verify configuration;
 key presence is not proof of a funded, working account. Normal `/last30days`

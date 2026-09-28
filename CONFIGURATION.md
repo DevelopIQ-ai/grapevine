@@ -304,6 +304,29 @@ failures. Doctor reports key presence, not live account
 health. This fork is at `DevelopIQ-ai/last30days-skill`; install with
 `npx skills add DevelopIQ-ai/last30days-skill -g`.
 
+Three pieces of research machinery (ported from the pixie-app GetXAPI
+researcher) ride on every GetXAPI call:
+
+- **Daily spend gate** — `~/.config/last30days/getxapi-usage.json` counts calls
+  per UTC day; `LAST30DAYS_GETXAPI_DAILY_BUDGET` sets the ceiling (default 800,
+  `0` disables the budget). A provider 429 latches the gate for five minutes so
+  every lane and dig round in that window skips GetXAPI instead of hammering a
+  saturated key.
+- **Cross-run research ledger** —
+  `~/.config/last30days/x-research-ledger.json` records, per normalized query,
+  the post ids already surfaced plus each product lane's cursor state. Posts a
+  later run re-fetches are flagged `previously_seen` in item metadata instead
+  of being presented as new. `LAST30DAYS_X_LEDGER=0` disables it.
+- **LLM-steered dig (`--x-dig N`)** — after initial X retrieval, the discovery
+  planner reviews the interim corpus and issues up to 3 follow-up GetXAPI
+  queries per round (alternate phrasings, named entities, `from:`/`@` lanes for
+  recurring voices), for N rounds. Follow-ups merge under an `x-dig` subquery
+  label and honor the gate and ledger. Needs a planner key
+  (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
+  rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
+  disables. Author name, bio, followers, and location from each post's author
+  object now flow into item metadata for lead-flavored research.
+
 **`LAST30DAYS_GETXAPI_EXACT_QUERY=1`** — process-environment opt-in that sends a
 generated query unchanged to GetXAPI rather than extracting and expanding topic
 keywords. The fixed engine date window still replaces embedded date operators. The
