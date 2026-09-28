@@ -392,6 +392,12 @@ def prune_low_relevance(
         return author in scoped_first_party.get(item.source, frozenset())
 
     def passes(item: schema.SourceItem) -> bool:
+        # Dig posts that survived Jev classification were already judged
+        # on-topic by a stronger signal than lexical overlap — don't re-prune
+        # them for missing keywords (that's exactly the miss mode Jev exists
+        # to catch).
+        if item.metadata.get("jev_score") is not None:
+            return True
         # YouTube items with successfully extracted transcripts should not
         # be pruned by title-only relevance scoring — the transcript content
         # already proves substantive topical coverage.

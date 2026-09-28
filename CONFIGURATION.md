@@ -328,7 +328,9 @@ researcher) ride on every GetXAPI call:
   relevance-classified by Jev before merging — off-topic candidates are
   dropped rather than ranked; `LAST30DAYS_X_DIG_JEV=0` disables that
   classification pass (falls back to keep-everything when no Jev key is
-  configured). Follow-ups merge under an `x-dig` subquery
+  configured). Jev-classified items are exempt from the downstream lexical
+  relevance floor, the entity-miss prune, and the fused-pool cap — a post the
+  classifier passed is never silently re-dropped by a weaker filter. Follow-ups merge under an `x-dig` subquery
   label and honor the gate and ledger. Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`

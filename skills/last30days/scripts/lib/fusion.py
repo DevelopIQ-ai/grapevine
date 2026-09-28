@@ -288,6 +288,15 @@ def _diversify_pool(
 
     protected = _reddit_engagement_reservation(fused, _reddit_reserve_for(pool_limit), entity)
     protected_ids = {c.candidate_id for c in protected}
+    # Candidates carrying a Jev classification already passed a stronger
+    # relevance judge than RRF rank: they keep their slot even below the
+    # pool cutoff, so broad dig retrieval can't be silently truncated.
+    for c in fused:
+        if c.candidate_id not in protected_ids and any(
+            si.metadata.get("jev_score") is not None for si in c.source_items
+        ):
+            protected.append(c)
+            protected_ids.add(c.candidate_id)
     pool: list[schema.Candidate] = list(protected)
     seen = set(protected_ids)
     reserved: dict[str, list[schema.Candidate]] = {}
@@ -323,7 +332,9 @@ def _diversify_pool(
                 trimmed.append(c)
                 keep_unprotected -= 1
         pool = trimmed
-    return pool[:pool_limit]
+    # Protected candidates (Jev-passed dig posts, Reddit reservations) are
+    # never cut by the cap — pool_limit bounds unprotected items only.
+    return pool[: max(pool_limit, len(protected_ids))]
 
 
 def weighted_rrf(

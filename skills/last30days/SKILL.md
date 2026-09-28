@@ -171,7 +171,9 @@ subquery label. Deep runs get 2 dig rounds by default; it needs a planner key
 `LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3). Dig queries
 go broad on purpose — every retrieved post is relevance-classified by Jev
 before merging, so off-topic hits are dropped (`LAST30DAYS_X_DIG_JEV=0` turns
-the filter off).
+the filter off). Jev-passed posts are also exempt from the lexical relevance
+floor and the ranked-pool cap, so a classifier-approved post can't be cut by
+weaker downstream filters.
 Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
 default 800) plus a five-minute latch after any provider 429, and a cross-run
 ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts

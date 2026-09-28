@@ -365,6 +365,8 @@ def _normalize_x(
         metadata["previously_seen"] = True
     if item.get("dig_round"):
         metadata["dig_round"] = item["dig_round"]
+    if item.get("jev_score") is not None:
+        metadata["jev_score"] = item["jev_score"]
     return _source_item(
         item_id=str(item.get("id") or f"X{index + 1}"),
         source=source,

@@ -5,3 +5,8 @@ posts are dropped (`jev_rejected` stat, `jev_score` on kept items) instead of
 polluting the report. This recovers recalls that keyword-AND queries miss
 (e.g. a launch post worded without the search verbs). `LAST30DAYS_X_DIG_JEV=0`
 disables the pass; it fails open when no Jev key is configured.
+
+Jev-classified dig posts are now exempt from the downstream lexical
+relevance floor, the fallback entity-miss prune, and the fused-pool
+cap — a post the classifier passed can no longer be silently cut by a
+weaker filter before emit.

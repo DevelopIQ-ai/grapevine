@@ -923,6 +923,14 @@ def to_agent_export(
                         max(0.0, min(1.0, candidate.final_score / 100.0)),
                         4,
                     ),
+                    "jev_score": next(
+                        (
+                            si.metadata.get("jev_score")
+                            for si in candidate.source_items
+                            if si.metadata.get("jev_score") is not None
+                        ),
+                        None,
+                    ),
                     "cluster": cluster_index,
                 }
             )
