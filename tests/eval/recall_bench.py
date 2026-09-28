@@ -169,7 +169,7 @@ def main() -> int:
     recall = hits / total if total else 0.0
     print(f"\nrecall {hits}/{total} = {recall:.0%}  "
           f"({len(items)} items emitted)")
-    for line in proc.stderr.splitlines():
+    for line in stderr.splitlines():
         if "dig" in line.lower():
             print(" ", line)
     return 0 if recall >= args.floor else 1
