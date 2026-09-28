@@ -1,0 +1,239 @@
+"""Tests for lib/x_research.py — the pixie GetXAPI researcher port.
+
+Covers the daily capacity gate (budget + retry latch), the cross-run JSON
+ledger (seen ids, cursor state, eviction), and the LLM-steered dig loop
+(planner drives follow-up queries until coverage or budget stops it).
+"""
+import json
+import time
+from unittest.mock import patch
+
+import pytest
+
+from lib import env, getxapi, http, x_research
+from lib import discovery_providers
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state_dir(tmp_path, monkeypatch):
+    """Point the ledger/gate files at a tmp dir and restore CONFIG_DIR after."""
+    monkeypatch.setattr(env, "CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("LAST30DAYS_GETXAPI_DAILY_BUDGET", raising=False)
+    monkeypatch.delenv("LAST30DAYS_X_LEDGER", raising=False)
+    yield
+
+
+def tweet(post_id="111", handle="alice"):
+    return {
+        "id": post_id,
+        "text": "interesting post",
+        "author": {"userName": handle, "name": "Alice", "description": "builder",
+                   "followers": 9001, "location": "SF"},
+        "createdAt": "Fri Sep 18 10:00:00 +0000 2026",
+        "likeCount": 7,
+    }
+
+
+# ---------------------------------------------------------------------------
+# DailyGate
+# ---------------------------------------------------------------------------
+
+def test_gate_charges_and_persists(tmp_path):
+    gate = x_research.DailyGate()
+    assert gate.check() is None
+    gate.charge()
+    gate.charge()
+    state = json.loads((tmp_path / x_research.GATE_FILE).read_text())
+    assert state["calls"] == 2
+
+
+def test_gate_budget_blocks(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_GETXAPI_DAILY_BUDGET", "2")
+    gate = x_research.DailyGate()
+    gate.charge()
+    gate.charge()
+    assert gate.check() == "daily budget reached (2 calls/day)"
+
+
+def test_gate_latch_blocks_until_retry_window(tmp_path):
+    gate = x_research.DailyGate()
+    gate.latch()
+    assert "rate limited" in (gate.check() or "")
+    # A fresh gate object reads the same latched state file.
+    assert "rate limited" in (x_research.DailyGate().check() or "")
+    # Expired latch clears.
+    past = {"day": x_research.datetime.now(x_research.UTC).date().isoformat(),
+            "calls": 1, "retry_until": time.time() - 10}
+    (tmp_path / x_research.GATE_FILE).write_text(json.dumps(past))
+    assert x_research.DailyGate().check() is None
+
+
+def test_gate_disabled_without_config_dir(monkeypatch):
+    monkeypatch.setattr(env, "CONFIG_DIR", None)
+    gate = x_research.DailyGate()
+    gate.charge()
+    gate.latch()
+    assert gate.check() is None
+
+
+# ---------------------------------------------------------------------------
+# Ledger
+# ---------------------------------------------------------------------------
+
+def test_ledger_roundtrip_and_dedupe(tmp_path):
+    ledger = x_research.Ledger()
+    ledger.record_query_run("AI Agents ")
+    ledger.record_page("AI Agents ", "Latest", ["1", "2"], "cur-1", True)
+    ledger.record_page("AI Agents ", "Latest", ["2", "3"], "cur-2", False)
+    fresh = x_research.Ledger()  # reload from disk — cross-run behavior
+    key = x_research.normalize_query("ai   agents")
+    assert fresh.seen_ids("ai   agents") == {"1", "2", "3"}
+    entry = fresh._entry(key)
+    assert entry["runs"] == 1
+    assert entry["products"]["Latest"]["has_more"] is False
+
+
+def test_ledger_disabled_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_LEDGER", "0")
+    ledger = x_research.Ledger()
+    assert ledger.enabled is False
+    ledger.record_page("q", "Latest", ["1"], None, False)
+    assert ledger.seen_ids("q") == set()
+    assert not (tmp_path / x_research.LEDGER_FILE).exists()
+
+
+def test_ledger_evicts_oldest_queries(tmp_path, monkeypatch):
+    monkeypatch.setattr(x_research, "LEDGER_MAX_QUERIES", 3)
+    ledger = x_research.Ledger()
+    for i in range(5):
+        ledger.record_query_run(f"q{i}")
+    queries = ledger._data["queries"]
+    assert len(queries) == 3
+    assert "q4" in queries and "q0" not in queries
+
+
+def test_normalize_query():
+    assert x_research.normalize_query("  AI   Agents\n") == "ai agents"
+    assert x_research.normalize_query(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# getxapi integration: gate + ledger through search_x
+# ---------------------------------------------------------------------------
+
+def test_search_x_gate_blocks_all_lanes(monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_GETXAPI_DAILY_BUDGET", "0")  # budget off
+    gate = x_research.DailyGate()
+    gate.latch()  # simulate a recent 429
+    with patch.object(http, "get") as mock_get:
+        result = getxapi.search_x("AI agents", "2026-08-19", "2026-09-19",
+                                  depth="quick", token="dummy", gate=gate)
+    assert mock_get.call_count == 0
+    assert "rate limited" in result["error"]
+
+
+def test_search_x_ledger_marks_previously_seen(tmp_path):
+    ledger = x_research.Ledger()
+    ledger.record_page("ai agents", "Latest", ["111"], None, False)
+    page = {"tweets": [tweet("111"), tweet("222")], "has_more": False}
+    with patch.object(http, "get", return_value=page):
+        result = getxapi.search_x("AI agents", "2026-08-19", "2026-09-19",
+                                  depth="quick", token="dummy", ledger=ledger)
+    by_id = {i["post_id"]: i for i in result["items"]}
+    assert by_id["111"]["previously_seen"] is True
+    assert "previously_seen" not in by_id["222"]
+    # The page was recorded into the ledger too.
+    assert x_research.Ledger().seen_ids("ai agents") >= {"111", "222"}
+
+
+def test_search_x_charges_gate(tmp_path):
+    page = {"tweets": [tweet()], "has_more": False}
+    with patch.object(http, "get", return_value=page):
+        getxapi.search_x("AI agents", "2026-08-19", "2026-09-19",
+                         depth="quick", token="dummy")
+    state = json.loads((tmp_path / x_research.GATE_FILE).read_text())
+    # one expanded query x Latest+Top lanes on quick depth
+    assert state["calls"] >= 2
+
+
+def test_search_x_author_fields(tmp_path):
+    page = {"tweets": [tweet()], "has_more": False}
+    with patch.object(http, "get", return_value=page):
+        result = getxapi.search_x("AI agents", "2026-08-19", "2026-09-19",
+                                  depth="quick", token="dummy")
+    item = result["items"][0]
+    assert item["author_name"] == "Alice"
+    assert item["author_bio"] == "builder"
+    assert item["author_followers"] == 9001
+    assert item["author_location"] == "SF"
+
+
+# ---------------------------------------------------------------------------
+# dig(): LLM-steered follow-up rounds
+# ---------------------------------------------------------------------------
+
+class FakePlanner:
+    def __init__(self, environ=None):
+        self.calls = 0
+
+    def plan(self, objective, filters, feedback, timeout):
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "action": "search",
+                "reason": "chase",
+                "coverage_summary": "needs more",
+                "queries": ["alt phrasing", "from:bob", "alt phrasing"],
+                "usage": {},
+            }
+        return {"action": "stop", "reason": "done",
+                "coverage_summary": "covered", "queries": [], "usage": {}}
+
+
+def test_dig_runs_followups_and_dedupes(tmp_path, monkeypatch):
+    interim = [{"post_id": "1", "text": "hit", "url": "https://x.com/a/status/1",
+                "author_handle": "a"}]
+    monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
+    dig_page = {"items": [
+        {"post_id": "1", "url": "https://x.com/a/status/1", "text": "dup"},
+        {"post_id": "9", "url": "https://x.com/b/status/9", "text": "new",
+         "author_handle": "b"},
+    ]}
+    with patch.object(getxapi, "search_exact", return_value=dig_page) as mock_exact:
+        items, warnings, stats = x_research.dig(
+            "AI agents", interim, ["AI agents"],
+            from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+            token="dummy", rounds=3,
+        )
+    assert stats["rounds_run"] == 2
+    assert stats["queries_run"] == 2  # repeat query dropped
+    assert stats["new_items"] == 1
+    assert items[0]["post_id"] == "9" and items[0]["dig_round"] == 1
+    assert warnings == []
+    # The planner saw interim hits in feedback.
+    assert mock_exact.call_count == 2
+
+
+def test_dig_stops_on_gate(tmp_path, monkeypatch):
+    gate = x_research.DailyGate()
+    gate.latch()
+    monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
+    items, warnings, stats = x_research.dig(
+        "AI agents", [], ["AI agents"],
+        from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+        token="dummy", rounds=2, gate=gate,
+    )
+    assert items == [] and stats["queries_run"] == 0
+    assert warnings and "rate limited" in warnings[0]
+
+
+def test_dig_without_planner_key(tmp_path, monkeypatch):
+    for name in ("DISCOVERY_PLANNER_API_KEY", "AI_GATEWAY_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    items, warnings, stats = x_research.dig(
+        "AI agents", [], [],
+        from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+        token="dummy", rounds=2,
+    )
+    assert items == [] and stats["queries_run"] == 0
+    assert warnings and "skipped" in warnings[0]

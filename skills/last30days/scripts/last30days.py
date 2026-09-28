@@ -814,6 +814,21 @@ def build_parser() -> argparse.ArgumentParser:
             "API key."
         ),
     )
+    parser.add_argument(
+        "--x-dig",
+        type=int,
+        nargs="?",
+        const=2,
+        metavar="N",
+        help=(
+            "LLM-steered iterative X dig: after initial retrieval, a planner "
+            "reviews interim hits and issues up to 3 follow-up GetXAPI queries "
+            "per round, for N rounds (bare --x-dig means 2). Requires GetXAPI "
+            "as the active X backend and a planner key (AI_GATEWAY_API_KEY or "
+            "OPENAI_API_KEY). LAST30DAYS_X_DIG_ROUNDS sets the env default; "
+            "--deep auto-enables 2 rounds unless the env var is set to 0."
+        ),
+    )
     parser.add_argument("--save-suffix", help="Suffix for saved output filename (e.g., 'gemini' → kanye-west-raw-gemini.md)")
     parser.add_argument("--subreddits", help="Comma-separated broad/category subreddit names to search (e.g., SaaS,Entrepreneur)")
     parser.add_argument("--dedicated-subreddits", help="Comma-separated entity-home subreddit names (e.g., Kanye,WestSubEver). Pulled in full (top+hot+new) and exempt from the relevance floor since the whole sub is the topic.")
@@ -4040,6 +4055,19 @@ def _main(
         config["_agent_rerank"] = bool(args.agent_rerank) and not (
             capabilities.has_reasoning_provider(config)
         )
+
+        # --x-dig (LLM-steered GetXAPI dig rounds). Flag wins; else env; else
+        # deep runs get 2 rounds by default. Pass --x-dig 0 or set the env var
+        # to 0 to disable.
+        _x_dig_rounds = args.x_dig
+        if _x_dig_rounds is None:
+            try:
+                _x_dig_rounds = int(
+                    config.get("LAST30DAYS_X_DIG_ROUNDS") or ""
+                )
+            except (TypeError, ValueError):
+                _x_dig_rounds = 2 if depth == "deep" else 0
+        config["_x_dig_rounds"] = max(0, _x_dig_rounds)
 
         def _main_runner() -> schema.Report:
             r = pipeline.run(

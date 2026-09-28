@@ -343,6 +343,12 @@ def _parse_tweet(
     """Parse a single tweet from the API response into the standard item format."""
     author = tweet.get("author") or {}
     username = str(author.get("username", "")).lstrip("@")
+    # Author profile fields (pixie researcher port): bio/followers/location
+    # carry the lead signal that engagement metrics alone miss.
+    author_name = str(author.get("name") or "").strip()
+    author_bio = str(author.get("description") or "").strip()
+    author_followers = _safe_int(author.get("followers"))
+    author_location = str(author.get("location") or "").strip()
     tweet_id = str(tweet.get("id", ""))
 
     # Build URL
@@ -382,7 +388,7 @@ def _parse_tweet(
         "bookmarks": _safe_int(tweet.get("bookmarkCount")),
     }
 
-    return {
+    item = {
         "id": f"{id_prefix}{index + 1}",
         "text": text,
         "url": url,
@@ -393,6 +399,15 @@ def _parse_tweet(
         "relevance": _compute_relevance(query, text) if query else 0.7,
         "why_relevant": "",
     }
+    if author_name:
+        item["author_name"] = author_name
+    if author_bio:
+        item["author_bio"] = author_bio[:500]
+    if author_followers is not None:
+        item["author_followers"] = author_followers
+    if author_location:
+        item["author_location"] = author_location
+    return item
 
 
 def _safe_int(value: Any) -> int | None:

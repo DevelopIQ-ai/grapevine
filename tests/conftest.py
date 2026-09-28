@@ -49,6 +49,21 @@ def _reset_probe_caches():
     grok_x.clear_availability_cache()
 
 @pytest.fixture(autouse=True)
+def _isolate_config_state_dir(tmp_path, monkeypatch):
+    """Redirect the config dir so per-run state files stay hermetic.
+
+    The GetXAPI daily-usage gate and cross-run research ledger persist under
+    env.CONFIG_DIR; without this, a test that latches the gate (a 429) or
+    records ledger entries would leak state into the developer's real
+    ~/.config/last30days and into subsequent tests in the same session.
+    """
+    from lib import env as _env
+
+    monkeypatch.setattr(_env, "CONFIG_DIR", tmp_path / "config-state")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_reddit_keyless_memo():
     """The keyless Reddit memo lives for one command; tests are their own commands."""
     from lib import http as _http

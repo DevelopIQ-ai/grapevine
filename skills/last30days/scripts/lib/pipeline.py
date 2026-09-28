@@ -4134,6 +4134,86 @@ def _run_supplemental_searches(
     ranking_query = plan.subqueries[0].ranking_query if plan.subqueries else topic
     primary_label = plan.subqueries[0].label if plan.subqueries else "primary"
 
+    # LLM-steered dig (pixie GetXAPI researcher port): a planner reviews the
+    # interim X corpus and issues follow-up queries that chase what surfaced —
+    # runs under the daily gate and the cross-run ledger.
+    try:
+        dig_rounds = int(config.get("_x_dig_rounds") or 0)
+    except (TypeError, ValueError):
+        dig_rounds = 0
+    if primary == "getxapi" and dig_rounds > 0:
+        getx_token = config.get("GETXAPI_KEY", "")
+        if getx_token:
+            try:
+                from . import x_research
+
+                interim = [
+                    {
+                        "text": it.body or "",
+                        "author_handle": it.author or "",
+                        "url": it.url or "",
+                        "engagement": it.engagement or {},
+                    }
+                    for it in bundle.items_by_source.get("x", [])
+                ]
+                tried = [
+                    sq.search_query for sq in plan.subqueries if sq.search_query
+                ]
+                dig_items, dig_warnings, dig_stats = x_research.dig(
+                    ranking_query or topic,
+                    interim,
+                    tried,
+                    from_date=from_date,
+                    to_date=to_date,
+                    depth=depth,
+                    token=getx_token,
+                    rounds=dig_rounds,
+                )
+                for warn in dig_warnings:
+                    print(f"[X dig] {warn}", file=sys.stderr)
+                if dig_stats.get("queries_run"):
+                    bundle.artifacts["x_dig"] = {
+                        "rounds": dig_stats.get("rounds_run", 0),
+                        "queries": dig_stats.get("queries_run", 0),
+                        "new_items": dig_stats.get("new_items", 0),
+                    }
+                if dig_items:
+                    normalized = _normalize_score_dedupe(
+                        x_slug,
+                        dig_items,
+                        from_date,
+                        to_date,
+                        freshness_mode=plan.freshness_mode,
+                        ranking_query=ranking_query,
+                    )
+                    normalized = [
+                        item for item in normalized if item.url not in existing_urls
+                    ]
+                    if normalized:
+                        if not any(
+                            sq.label == "x-dig" for sq in plan.subqueries
+                        ):
+                            plan.subqueries.append(
+                                schema.SubQuery(
+                                    label="x-dig",
+                                    search_query=topic,
+                                    ranking_query=ranking_query,
+                                    sources=[x_slug],
+                                    weight=0.9,
+                                )
+                            )
+                        bundle.add_items("x-dig", x_slug, normalized)
+                        for item in normalized:
+                            if item.url:
+                                existing_urls.add(item.url)
+                        print(
+                            f"[X dig] {dig_stats.get('queries_run', 0)} follow-up "
+                            f"queries surfaced {len(normalized)} new posts",
+                            file=sys.stderr,
+                        )
+            except Exception as exc:
+                print(f"[X dig] failed: {exc}", file=sys.stderr)
+
     # Split FROM promotion: determine which handles get FROM lane and how.
     # - Primary explicit handle (--x-handle): always FROM, no AND topic, full weight
     # - x_related handles: searched separately with lower weight (0.3), kept in

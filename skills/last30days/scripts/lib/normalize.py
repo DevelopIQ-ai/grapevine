@@ -353,6 +353,18 @@ def _normalize_x(
 ) -> schema.SourceItem:
     text = str(item.get("text") or "").strip()
     mentioned = item.get("mentioned_handles") or []
+    metadata: dict[str, Any] = {}
+    if mentioned:
+        metadata["mentioned_handles"] = list(mentioned)
+    # Lead-signal fields carried from the GetXAPI author object (pixie port).
+    for key in ("author_name", "author_bio", "author_followers", "author_location"):
+        value = item.get(key)
+        if value not in (None, ""):
+            metadata[key] = value
+    if item.get("previously_seen"):
+        metadata["previously_seen"] = True
+    if item.get("dig_round"):
+        metadata["dig_round"] = item["dig_round"]
     return _source_item(
         item_id=str(item.get("id") or f"X{index + 1}"),
         source=source,
@@ -365,7 +377,7 @@ def _normalize_x(
         engagement=item.get("engagement") or {},
         relevance_hint=item.get("relevance", 0.5),
         why_relevant=str(item.get("why_relevant") or ""),
-        metadata={"mentioned_handles": list(mentioned)} if mentioned else {},
+        metadata=metadata,
     )
 
 
