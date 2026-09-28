@@ -290,16 +290,61 @@ def _digest_items(items: list[dict]) -> list[dict]:
     for item in items[-MAX_DIGEST_ITEMS:]:
         if not isinstance(item, dict):
             continue
+        text = (
+            item.get("text") or item.get("body")
+            or item.get("title") or item.get("snippet") or ""
+        )
         digest.append(
             {
-                "text": str(item.get("text") or item.get("body") or "")[:MAX_DIGEST_TEXT],
+                "text": str(text)[:MAX_DIGEST_TEXT],
                 "author": str(item.get("author_handle") or item.get("author") or ""),
-                "url": str(item.get("url") or ""),
+                "url": str(item.get("url") or item.get("hn_url") or ""),
                 "likes": (item.get("engagement") or {}).get("likes"),
                 "previously_seen": bool(item.get("previously_seen")),
             }
         )
     return digest
+
+
+_X_CONTEXT_NOTE = (
+    "Iterative X dig: queries run through GetXAPI advanced search "
+    "(Latest and Top lanes). Every retrieved post is scored for "
+    "relevance by a downstream classifier, so favor broad retrieval "
+    "— single terms, product/vendor names, category words — over "
+    "multi-keyword constructions; search engines AND terms, and a "
+    "missing synonym means a total miss. Good pivots: bare entity or "
+    "product names, alternate phrasings, sub-events, or "
+    "from:handle / @handle lanes for recurring voices. X search "
+    "supports from:, @handle, \"exact phrase\", and plain keywords; "
+    "since:/until: dates are applied by the engine."
+)
+
+_LANE_LABELS = {
+    "x": "X/Twitter posts",
+    "hackernews": "Hacker News stories",
+    "grounding": "web pages",
+}
+
+_LANE_CONTEXT_NOTES = {
+    "hackernews": (
+        "Iterative dig: queries run through the Hacker News Algolia stories "
+        "index. Every retrieved story is scored for relevance by a "
+        "downstream classifier, so favor broad retrieval — single terms, "
+        "product/vendor names, category words — over multi-keyword "
+        "constructions; Algolia ANDs leading terms, and a missing synonym "
+        "means a total miss. Good pivots: bare product or project names, "
+        "'Show HN'-style launch phrasings, alternate terms for the same "
+        "thing. No operators — plain keywords only."
+    ),
+    "grounding": (
+        "Iterative dig: queries run through a web search backend. Every "
+        "retrieved page is scored for relevance by a downstream classifier, "
+        "so favor broad retrieval — single terms, product/vendor names, "
+        "category words — over long keyword strings. Good pivots: bare "
+        "product or company names, alternate phrasings, official domains, "
+        "launch/announcement phrasings."
+    ),
+}
 
 
 def _dig_feedback(
@@ -309,6 +354,7 @@ def _dig_feedback(
     round_no: int,
     previous_assessment: str | None,
     queries_requested: int,
+    context_note: str | None = None,
 ) -> dict:
     return {
         "queries": tried[-100:],
@@ -318,19 +364,154 @@ def _dig_feedback(
         "queries_requested": queries_requested,
         "previous_assessment": previous_assessment,
         "rounds": [{"number": i + 1} for i in range(round_no)],
-        "context_note": (
-            "Iterative X dig: queries run through GetXAPI advanced search "
-            "(Latest and Top lanes). Every retrieved post is scored for "
-            "relevance by a downstream classifier, so favor broad retrieval "
-            "— single terms, product/vendor names, category words — over "
-            "multi-keyword constructions; search engines AND terms, and a "
-            "missing synonym means a total miss. Good pivots: bare entity or "
-            "product names, alternate phrasings, sub-events, or "
-            "from:handle / @handle lanes for recurring voices. X search "
-            "supports from:, @handle, \"exact phrase\", and plain keywords; "
-            "since:/until: dates are applied by the engine."
-        ),
+        "context_note": context_note or _X_CONTEXT_NOTE,
     }
+
+
+def _item_dedupe_keys(item: dict) -> tuple[str, str]:
+    """(id, url) dedupe keys; works for X posts and HN/web items alike."""
+    return (
+        str(item.get("post_id") or item.get("id") or ""),
+        str(item.get("url") or item.get("hn_url") or ""),
+    )
+
+
+def dig_source(
+    lane: str,
+    topic: str,
+    interim_items: list[dict],
+    tried_queries: list[str],
+    *,
+    search_fn,
+    rounds: int,
+    environ=None,
+    gate: "DailyGate | None" = None,
+    ledger: "Ledger | None" = None,
+    timeout: int = 60,
+    context_note: str | None = None,
+) -> tuple[list[dict], list[str], dict]:
+    """LLM-steered iterative dig over any search lane.
+
+    Each round the discovery Planner reviews the interim corpus and emits
+    follow-up queries (or declares coverage complete). ``search_fn(query)``
+    executes one query against the lane's backend and returns a dict with
+    ``items`` and optional ``error``. Every batch is relevance-classified by
+    Jev when configured (broad queries stay safe because weak hits are
+    dropped, not kept). Returns ``(new_items, warnings, stats)``; new items
+    exclude ids/urls already in ``interim_items``.
+    """
+    from . import discovery_providers
+
+    warnings: list[str] = []
+    stats = {"rounds_run": 0, "queries_run": 0, "new_items": 0,
+             "jev_rejected": 0}
+    if rounds <= 0 or search_fn is None:
+        return [], warnings, stats
+    env_map = os.environ if environ is None else environ
+    label = _LANE_LABELS.get(lane, lane)
+    try:
+        planner = discovery_providers.Planner(environ)
+    except discovery_providers.ProviderError as exc:
+        warnings.append(f"{label} dig skipped: {exc}")
+        return [], warnings, stats
+
+    jev = None
+    if str(env_map.get("LAST30DAYS_X_DIG_JEV") or "1") != "0":
+        try:
+            jev = discovery_providers.Jev(environ)
+        except discovery_providers.ProviderError:
+            jev = None
+
+    objective = (
+        f"{label} relevant to: {topic}. Surface posts that the queries "
+        "already tried did not reach — broad single-term and entity-name "
+        "queries are safe because every candidate is relevance-classified "
+        "downstream; keyword stuffing hides posts whose wording differs."
+    )
+    filters = {"source": lane}
+    seen_ids = set()
+    seen_urls = set()
+    for i in interim_items:
+        if isinstance(i, dict):
+            pid, url = _item_dedupe_keys(i)
+            if pid:
+                seen_ids.add(pid)
+            if url:
+                seen_urls.add(url)
+    tried = list(tried_queries)
+    tried_norm = {normalize_query(q) for q in tried}
+    queries_per_round = max(
+        1, _map_int(env_map, "LAST30DAYS_X_DIG_QUERIES", DIG_QUERIES_PER_ROUND)
+    )
+    new_items: list[dict] = []
+    previous_assessment = None
+
+    for round_no in range(rounds):
+        blocked = gate.check() if gate else None
+        if blocked:
+            warnings.append(f"{label} dig stopped: {blocked}")
+            break
+        try:
+            decision = planner.plan(
+                objective, filters,
+                _dig_feedback(topic, tried, interim_items + new_items,
+                              round_no, previous_assessment,
+                              queries_per_round,
+                              context_note=context_note
+                              or _LANE_CONTEXT_NOTES.get(lane)),
+                timeout,
+            )
+        except discovery_providers.ProviderError as exc:
+            warnings.append(f"{label} dig planner failed: {exc}")
+            break
+        previous_assessment = decision.get("coverage_summary")
+        stats["rounds_run"] = round_no + 1
+        if decision.get("action") != "search":
+            break
+        produced = False
+        round_items: list[dict] = []
+        for query in (decision.get("queries") or [])[:queries_per_round]:
+            if normalize_query(query) in tried_norm:
+                continue
+            tried_norm.add(normalize_query(query))
+            tried.append(query)
+            stats["queries_run"] += 1
+            try:
+                result = search_fn(query)
+            except Exception as exc:
+                warnings.append(f"{label} dig query {query!r}: {exc}")
+                continue
+            if result.get("error") and not result.get("items"):
+                warnings.append(f"{label} dig query {query!r}: {result['error']}")
+                continue
+            produced = True
+            ledger_key = f"{lane}:{query}"
+            known = ledger.seen_ids(ledger_key) if ledger else set()
+            if ledger:
+                ledger.record_query_run(ledger_key)
+            found_ids: list[str] = []
+            for item in result.get("items") or []:
+                pid, url = _item_dedupe_keys(item)
+                if (pid and pid in seen_ids) or (url and url in seen_urls):
+                    continue
+                if pid:
+                    seen_ids.add(pid)
+                    found_ids.append(pid)
+                if url:
+                    seen_urls.add(url)
+                if pid and pid in known:
+                    item["previously_seen"] = True
+                item["dig_round"] = round_no + 1
+                round_items.append(item)
+            if ledger and found_ids:
+                ledger.record_page(ledger_key, lane, found_ids, None, False)
+        if not produced:
+            # Planner asked for queries but all were repeats — treat as done.
+            break
+        new_items.extend(_classify_round(round_items, jev, objective,
+                                       stats, warnings, timeout))
+    stats["new_items"] = len(new_items)
+    return new_items, warnings, stats
 
 
 def dig(
@@ -356,106 +537,23 @@ def dig(
     ``(new_items, warnings, stats)``; new items exclude post ids already in
     ``interim_items``.
     """
-    from . import discovery_providers, getxapi
+    from . import getxapi
 
-    warnings: list[str] = []
-    stats = {"rounds_run": 0, "queries_run": 0, "new_items": 0,
-             "jev_rejected": 0}
-    if rounds <= 0 or not token:
-        return [], warnings, stats
-    env_map = os.environ if environ is None else environ
-    try:
-        planner = discovery_providers.Planner(environ)
-    except discovery_providers.ProviderError as exc:
-        warnings.append(f"X dig skipped: {exc}")
-        return [], warnings, stats
+    if not token:
+        return [], [], {"rounds_run": 0, "queries_run": 0, "new_items": 0,
+                        "jev_rejected": 0}
 
-    jev = None
-    if str(env_map.get("LAST30DAYS_X_DIG_JEV") or "1") != "0":
-        try:
-            jev = discovery_providers.Jev(environ)
-        except discovery_providers.ProviderError:
-            jev = None
+    def _search(query: str) -> dict:
+        return getxapi.search_exact(
+            query, from_date, to_date, depth=depth, token=token,
+            gate=gate, ledger=ledger,
+        )
 
-    objective = (
-        f"X/Twitter posts relevant to: {topic}. Surface posts that the queries "
-        "already tried did not reach — broad single-term and entity-name "
-        "queries are safe because every candidate is relevance-classified "
-        "downstream; keyword stuffing hides posts whose wording differs."
+    return dig_source(
+        "x", topic, interim_items, tried_queries,
+        search_fn=_search, rounds=rounds, environ=environ, gate=gate,
+        timeout=timeout,
     )
-    filters = {"source": "x", "from": from_date, "to": to_date}
-    seen_post_ids = {
-        str(i.get("post_id") or "")
-        for i in interim_items
-        if isinstance(i, dict) and i.get("post_id")
-    }
-    seen_urls = {
-        str(i.get("url") or "")
-        for i in interim_items
-        if isinstance(i, dict) and i.get("url")
-    }
-    tried = list(tried_queries)
-    tried_norm = {normalize_query(q) for q in tried}
-    queries_per_round = max(
-        1, _map_int(env_map, "LAST30DAYS_X_DIG_QUERIES", DIG_QUERIES_PER_ROUND)
-    )
-    new_items: list[dict] = []
-    previous_assessment = None
-
-    for round_no in range(rounds):
-        blocked = gate.check() if gate else None
-        if blocked:
-            warnings.append(f"X dig stopped: GetXAPI {blocked}")
-            break
-        try:
-            decision = planner.plan(
-                objective, filters,
-                _dig_feedback(topic, tried, interim_items + new_items,
-                              round_no, previous_assessment,
-                              queries_per_round),
-                timeout,
-            )
-        except discovery_providers.ProviderError as exc:
-            warnings.append(f"X dig planner failed: {exc}")
-            break
-        previous_assessment = decision.get("coverage_summary")
-        stats["rounds_run"] = round_no + 1
-        if decision.get("action") != "search":
-            break
-        produced = False
-        round_items: list[dict] = []
-        for query in (decision.get("queries") or [])[:queries_per_round]:
-            if normalize_query(query) in tried_norm:
-                continue
-            tried_norm.add(normalize_query(query))
-            tried.append(query)
-            stats["queries_run"] += 1
-            result = getxapi.search_exact(
-                query, from_date, to_date, depth=depth, token=token,
-                gate=gate, ledger=ledger,
-            )
-            if result.get("error") and not result.get("items"):
-                warnings.append(f"X dig query {query!r}: {result['error']}")
-                continue
-            produced = True
-            for item in result.get("items") or []:
-                pid = str(item.get("post_id") or "")
-                url = str(item.get("url") or "")
-                if (pid and pid in seen_post_ids) or (url and url in seen_urls):
-                    continue
-                if pid:
-                    seen_post_ids.add(pid)
-                if url:
-                    seen_urls.add(url)
-                item["dig_round"] = round_no + 1
-                round_items.append(item)
-        if not produced:
-            # Planner asked for queries but all were repeats — treat as done.
-            break
-        new_items.extend(_classify_round(round_items, jev, objective,
-                                       stats, warnings, timeout))
-    stats["new_items"] = len(new_items)
-    return new_items, warnings, stats
 
 
 # Jev reject/evidence bands, mirroring discovery.py's defaults.
@@ -475,14 +573,23 @@ def _classify_round(items, jev, objective, stats, warnings, timeout):
     from . import discovery_providers
     kept = []
     for idx, item in enumerate(items):
+        text = "\n".join(
+            part for part in [
+                str(item.get("title") or "").strip(),
+                str(
+                    item.get("text") or item.get("body")
+                    or item.get("snippet") or ""
+                ).strip(),
+            ] if part
+        )
         try:
             judgement = jev.classify(objective, [objective], {
-                "text": str(item.get("text") or item.get("body") or "")[:2000],
+                "text": text[:2000],
                 "author": str(item.get("author_handle") or item.get("author") or ""),
-                "url": str(item.get("url") or ""),
+                "url": str(item.get("url") or item.get("hn_url") or ""),
             }, timeout)
         except discovery_providers.ProviderError as exc:
-            warnings.append(f"X dig classifier degraded: {exc}"
+            warnings.append(f"Dig classifier degraded: {exc}"
                             " (keeping remaining items unclassified)")
             kept.extend(items[idx:])
             break

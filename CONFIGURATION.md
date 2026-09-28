@@ -320,18 +320,24 @@ researcher) ride on every GetXAPI call:
   are tunable: `LAST30DAYS_X_LEDGER_MAX_QUERIES` (default 400 queries
   remembered) and `LAST30DAYS_X_LEDGER_MAX_IDS` (default 2000 post ids per
   query); `0` lifts either cap.
-- **LLM-steered dig (`--x-dig N`)** — after initial X retrieval, the discovery
-  planner reviews the interim corpus and issues up to 3 follow-up GetXAPI
-  queries per round, for N rounds; `LAST30DAYS_X_DIG_QUERIES` retunes the
-  per-round count. Dig favors broad retrieval (bare entity names, category
-  terms) over multi-keyword queries because every retrieved post is
-  relevance-classified by Jev before merging — off-topic candidates are
-  dropped rather than ranked; `LAST30DAYS_X_DIG_JEV=0` disables that
-  classification pass (falls back to keep-everything when no Jev key is
-  configured). Jev-classified items are exempt from the downstream lexical
-  relevance floor, the entity-miss prune, and the fused-pool cap — a post the
-  classifier passed is never silently re-dropped by a weaker filter. Follow-ups merge under an `x-dig` subquery
-  label and honor the gate and ledger. Needs a planner key
+- **LLM-steered dig (`--x-dig N`)** — after initial retrieval, the discovery
+  planner reviews the interim corpus and issues up to 3 follow-up queries per
+  round, for N rounds, on each diggable lane: X via GetXAPI, Hacker News via
+  the (keyless) Algolia index, and the web via the configured grounding
+  backend; `LAST30DAYS_X_DIG_SOURCES` narrows the lane set (e.g.
+  `LAST30DAYS_X_DIG_SOURCES=x` for X-only digging) and
+  `LAST30DAYS_X_DIG_QUERIES` retunes the per-round count. Dig favors broad
+  retrieval (bare entity names, category terms) over multi-keyword queries
+  because every retrieved post is relevance-classified by Jev before merging
+  — off-topic candidates are dropped rather than ranked;
+  `LAST30DAYS_X_DIG_JEV=0` disables that classification pass (falls back to
+  keep-everything when no Jev key is configured). Jev-classified items are
+  exempt from the downstream lexical relevance floor, the entity-miss prune,
+  and the fused-pool cap — a post the classifier passed is never silently
+  re-dropped by a weaker filter. Follow-ups merge under `x-dig`, `hn-dig`,
+  and `web-dig` subquery labels; X follow-ups honor the gate, and all lanes
+  share the ledger (namespaced per lane) so `previously_seen` memory applies
+  to HN and web items too. Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
   disables. Author name, bio, followers, and location from each post's author

@@ -344,6 +344,23 @@ def _normalize_reddit(
     )
 
 
+def _dig_metadata(item: dict[str, Any]) -> dict[str, Any]:
+    """Metadata fields a dig-produced item carries into normalization.
+
+    jev_score is the Jev relevance verdict — downstream prune/diversify code
+    treats any item bearing it as already judged and exempts it from the
+    keyword floors and pool cap.
+    """
+    metadata: dict[str, Any] = {}
+    if item.get("previously_seen"):
+        metadata["previously_seen"] = True
+    if item.get("dig_round"):
+        metadata["dig_round"] = item["dig_round"]
+    if item.get("jev_score") is not None:
+        metadata["jev_score"] = item["jev_score"]
+    return metadata
+
+
 def _normalize_x(
     source: str,
     item: dict[str, Any],
@@ -361,12 +378,7 @@ def _normalize_x(
         value = item.get(key)
         if value not in (None, ""):
             metadata[key] = value
-    if item.get("previously_seen"):
-        metadata["previously_seen"] = True
-    if item.get("dig_round"):
-        metadata["dig_round"] = item["dig_round"]
-    if item.get("jev_score") is not None:
-        metadata["jev_score"] = item["jev_score"]
+    metadata.update(_dig_metadata(item))
     return _source_item(
         item_id=str(item.get("id") or f"X{index + 1}"),
         source=source,
@@ -579,6 +591,7 @@ def _normalize_hackernews(
             "hn_url": item.get("hn_url"),
             "top_comments": top_comments,
             "comment_insights": item.get("comment_insights") or [],
+            **_dig_metadata(item),
         },
     )
 
@@ -1027,6 +1040,8 @@ def _normalize_grounding(
     title = str(item.get("title") or "").strip()
     snippet = str(item.get("snippet") or "").strip()
     url = str(item.get("url") or "").strip()
+    metadata = dict(item.get("metadata") or {})
+    metadata.update(_dig_metadata(item))
     return _source_item(
         item_id=str(item.get("id") or f"W{index + 1}"),
         source=source,
@@ -1041,7 +1056,7 @@ def _normalize_grounding(
         relevance_hint=item.get("relevance", 0.5),
         why_relevant=str(item.get("why_relevant") or ""),
         snippet=snippet,
-        metadata=item.get("metadata") or {},
+        metadata=metadata,
     )
 
 

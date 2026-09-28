@@ -342,3 +342,114 @@ def test_dig_without_planner_key(tmp_path, monkeypatch):
     )
     assert items == [] and stats["queries_run"] == 0
     assert warnings and "skipped" in warnings[0]
+
+
+# ---------------------------------------------------------------------------
+# dig_source — the generalized loop driving non-X lanes (HN, web)
+# ---------------------------------------------------------------------------
+
+
+class TwoRoundPlanner:
+    """Round 1: two broad queries. Round 2: stop."""
+
+    def __init__(self, environ=None):
+        self.calls = 0
+        self.feedback_notes = []
+
+    def plan(self, objective, filters, feedback, timeout):
+        self.calls += 1
+        self.feedback_notes.append(feedback.get("context_note") or "")
+        if self.calls == 1:
+            return {"action": "search", "reason": "chase",
+                    "coverage_summary": "needs more",
+                    "queries": ["substrate", "show hn sandboxes"], "usage": {}}
+        return {"action": "stop", "reason": "done",
+                "coverage_summary": "covered", "queries": [], "usage": {}}
+
+
+def _hn_items():
+    return [
+        {"id": "hn1", "title": "Show HN: Substrate", "url": "https://s.io",
+         "hn_url": "https://news.ycombinator.com/item?id=hn1",
+         "author": "bob", "engagement": {"points": 4}},
+        {"id": "hn2", "title": "Show HN: DiscoBox", "url": "https://d.io",
+         "hn_url": "https://news.ycombinator.com/item?id=hn2",
+         "author": "cat", "engagement": {"points": 2}},
+    ]
+
+
+def test_dig_source_runs_queries_dedupes_and_tags_round(tmp_path, monkeypatch):
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    interim = [{"id": "hn1", "url": "https://s.io"}]
+    calls = []
+
+    def search(query):
+        calls.append(query)
+        return {"items": _hn_items()}
+
+    items, warnings, stats = x_research.dig_source(
+        "hackernews", "sandbox launches", interim, ["sandbox"],
+        search_fn=search, rounds=3,
+    )
+    assert stats["rounds_run"] == 2 and stats["queries_run"] == 2
+    # hn1 deduped against interim; hn2 kept with dig_round stamped.
+    assert [i["id"] for i in items] == ["hn2"]
+    assert items[0]["dig_round"] == 1
+    assert warnings == []
+
+
+def test_dig_source_hn_context_note_not_x(tmp_path, monkeypatch):
+    planner = TwoRoundPlanner()
+    monkeypatch.setattr(discovery_providers, "Planner",
+                        lambda environ=None: planner)
+    items, _, _ = x_research.dig_source(
+        "hackernews", "sandbox launches", [], [],
+        search_fn=lambda q: {"items": _hn_items()}, rounds=1,
+    )
+    assert items
+    assert planner.feedback_notes and "Algolia" in planner.feedback_notes[0]
+
+
+def test_dig_source_jev_drops_off_topic(tmp_path, monkeypatch):
+    class FakeJev:
+        def __init__(self, environ=None):
+            pass
+
+        def classify(self, objective, criteria, item, timeout):
+            drop = "unrelated" in item["text"].lower()
+            return {"probabilities": {"c0": 0.1 if drop else 0.9},
+                    "evidence_sufficient": 0.9}
+
+    monkeypatch.delenv("LAST30DAYS_X_DIG_JEV", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    monkeypatch.setattr(discovery_providers, "Jev", FakeJev)
+    items, warnings, stats = x_research.dig_source(
+        "grounding", "sandbox launches", [], [],
+        search_fn=lambda q: {"items": [
+            {"id": "w1", "title": "Substrate sandbox runtime",
+             "url": "https://a.io"},
+            {"id": "w2", "title": "unrelated cooking blog",
+             "url": "https://b.io"},
+        ]},
+        rounds=1,
+    )
+    assert [i["id"] for i in items] == ["w1"]
+    assert items[0]["jev_score"] == 0.9
+    assert stats["jev_rejected"] >= 1
+
+
+def test_dig_source_ledger_marks_previously_seen(tmp_path, monkeypatch):
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    ledger = x_research.Ledger({})
+    search = lambda q: {"items": _hn_items()}
+    first, _, _ = x_research.dig_source(
+        "hackernews", "sandboxes", [], [], search_fn=search,
+        rounds=1, ledger=ledger,
+    )
+    assert not any(i.get("previously_seen") for i in first)
+    # Second run, fresh interim: same ids re-fetched are flagged.
+    second, _, _ = x_research.dig_source(
+        "hackernews", "sandboxes", [], [], search_fn=search,
+        rounds=1, ledger=ledger,
+    )
+    assert second and all(i.get("previously_seen") for i in second)

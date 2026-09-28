@@ -351,3 +351,45 @@ class NormalizeV3Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DigMetadataPropagationTests(unittest.TestCase):
+    """Dig-produced items carry jev_score/dig_round/previously_seen into
+    metadata on every lane they can arrive from, so the downstream
+    prune/pool exemptions apply regardless of source."""
+
+    def test_hackernews_item_propagates_dig_metadata(self):
+        items = [{
+            "id": "hn1", "title": "Show HN: Substrate",
+            "url": "https://substrate.dev",
+            "hn_url": "https://news.ycombinator.com/item?id=hn1",
+            "author": "bob", "date": "2026-09-25",
+            "dig_round": 1, "jev_score": 0.87,
+        }]
+        [item] = normalize.normalize_source_items(
+            "hackernews", items, "2026-08-28", "2026-09-28")
+        assert item.metadata["jev_score"] == 0.87
+        assert item.metadata["dig_round"] == 1
+
+    def test_grounding_item_propagates_dig_metadata(self):
+        items = [{
+            "id": "w1", "title": "Prime Sandboxes GA",
+            "url": "https://primeintellect.ai/blog/sandboxes",
+            "snippet": "MicroVM sandboxes for agents",
+            "date": "2026-09-23",
+            "dig_round": 2, "jev_score": 0.92, "previously_seen": True,
+        }]
+        [item] = normalize.normalize_source_items(
+            "grounding", items, "2026-08-28", "2026-09-28")
+        assert item.metadata["jev_score"] == 0.92
+        assert item.metadata["previously_seen"] is True
+
+    def test_hackernews_item_without_dig_fields_unchanged(self):
+        items = [{
+            "id": "hn2", "title": "Regular story",
+            "url": "https://example.com", "date": "2026-09-25",
+        }]
+        [item] = normalize.normalize_source_items(
+            "hackernews", items, "2026-08-28", "2026-09-28")
+        assert "jev_score" not in item.metadata
+        assert "dig_round" not in item.metadata

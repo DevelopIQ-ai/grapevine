@@ -821,11 +821,13 @@ def build_parser() -> argparse.ArgumentParser:
         const=2,
         metavar="N",
         help=(
-            "LLM-steered iterative X dig: after initial retrieval, a planner "
-            "reviews interim hits and issues up to 3 follow-up GetXAPI queries "
-            "per round, for N rounds (bare --x-dig means 2). Requires GetXAPI "
-            "as the active X backend and a planner key (AI_GATEWAY_API_KEY or "
-            "OPENAI_API_KEY). LAST30DAYS_X_DIG_ROUNDS sets the env default; "
+            "LLM-steered iterative dig: after initial retrieval, a planner "
+            "reviews interim hits and issues up to 3 follow-up queries per "
+            "round for N rounds on each diggable lane — X (GetXAPI), Hacker "
+            "News (Algolia) and web (configured backend) — with every "
+            "candidate relevance-classified by Jev before merging "
+            "(bare --x-dig means 2). LAST30DAYS_X_DIG_ROUNDS sets the env "
+            "default and LAST30DAYS_X_DIG_SOURCES narrows the lane set; "
             "--deep auto-enables 2 rounds unless the env var is set to 0."
         ),
     )

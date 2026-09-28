@@ -162,14 +162,17 @@ upstream defaults (ten requests; `LAST30DAYS_GETXAPI_MAX_PAGES` overrides), so
 GetXAPI spend is roughly 2x the upstream lane but still cents per run. When a
 run surfaces a breakout post, handle, or subtheme, prefer a second engine pass
 with chase subqueries over widening the first plan — iteration beats breadth.
-For "dig deep / find everything" asks on X, pass `--x-dig` (or `--x-dig N` for
+For "dig deep / find everything" asks, pass `--x-dig` (or `--x-dig N` for
 N rounds): after the first retrieval a planner reviews interim hits and issues
-follow-up GetXAPI queries that chase what surfaced — alternate phrasings, named
-entities, and `from:`/`@` lanes for recurring voices — merged under an `x-dig`
-subquery label. Deep runs get 2 dig rounds by default; it needs a planner key
-(`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and silently skips when absent.
+follow-up queries that chase what surfaced — alternate phrasings, named
+entities, and `from:`/`@` lanes for recurring voices on X, broad product and
+project names on Hacker News (keyless Algolia) and the web backend — merged
+under `x-dig` / `hn-dig` / `web-dig` subquery labels. Deep runs get 2 dig
+rounds by default; it needs a planner key (`AI_GATEWAY_API_KEY` or
+`OPENAI_API_KEY`) and silently skips when absent.
+`LAST30DAYS_X_DIG_SOURCES` narrows which lanes dig (default all three) and
 `LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3). Dig queries
-go broad on purpose — every retrieved post is relevance-classified by Jev
+go broad on purpose — every retrieved item is relevance-classified by Jev
 before merging, so off-topic hits are dropped (`LAST30DAYS_X_DIG_JEV=0` turns
 the filter off). Jev-passed posts are also exempt from the lexical relevance
 floor and the ranked-pool cap, so a classifier-approved post can't be cut by
