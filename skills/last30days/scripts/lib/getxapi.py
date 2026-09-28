@@ -11,21 +11,24 @@ from .x_api import is_own_post
 
 BASE_URL = "https://api.getxapi.com/twitter/tweet/advanced_search"
 DEFAULT_MAX_PAGES = 10
+# Per-lane page budget by run depth: deeper runs spend more pages before giving
+# up on a cursor. LAST30DAYS_GETXAPI_MAX_PAGES overrides all of them.
+DEPTH_MAX_PAGES = {"quick": 5, "default": 10, "deep": 20}
 # Each topic query fans out to both GetXAPI product lanes: Latest (chronological
 # firehose) and Top (engagement-ranked). Top surfaces high-signal posts that sit
 # outside the recent tail Latest returns.
 TOPIC_PRODUCTS = ("Latest", "Top")
 
 
-def _max_pages():
+def _max_pages(depth="default"):
     """Per-lane page budget; LAST30DAYS_GETXAPI_MAX_PAGES overrides."""
     try:
         return max(1, int(os.environ.get("LAST30DAYS_GETXAPI_MAX_PAGES", "")))
     except ValueError:
-        return DEFAULT_MAX_PAGES
+        return DEPTH_MAX_PAGES.get(depth, DEFAULT_MAX_PAGES)
 
 
-def _search(query, from_date, to_date, token, limit, topic, product="Latest", prefix="GX"):
+def _search(query, from_date, to_date, token, limit, topic, product="Latest", prefix="GX", depth="default"):
     """Bound page spend, preserve partial evidence, and never echo provider errors."""
     items, seen_ids, seen_cursors = [], set(), set()
     cursor = None
@@ -34,7 +37,7 @@ def _search(query, from_date, to_date, token, limit, topic, product="Latest", pr
     # Engine dates are inclusive; X until: is exclusive. Include the final day.
     until = (date.fromisoformat(to_date) + timedelta(days=1)).isoformat()
     params = {"q": f"{query} since:{from_date} until:{until}", "product": product}
-    for _ in range(_max_pages()):
+    for _ in range(_max_pages(depth)):
         if cursor:
             params["cursor"] = cursor
         try:
@@ -98,7 +101,8 @@ def search_x(topic, from_date, to_date, depth="default", token=""):
     for query in queries:
         for product in TOPIC_PRODUCTS:
             found, error = _search(query, from_date, to_date, token,
-                                   per_product_limit, topic, product=product)
+                                   per_product_limit, topic, product=product,
+                                   depth=depth)
             for item in found:
                 if item['post_id'] not in seen:
                     seen.add(item['post_id'])
@@ -112,7 +116,7 @@ def search_x(topic, from_date, to_date, depth="default", token=""):
     return {"items": items, **({"error": "; ".join(errors)} if errors else {})}
 
 
-def _handles(handles, topic, from_date, to_date, count_per, token, mentions):
+def _handles(handles, topic, from_date, to_date, count_per, token, mentions, depth="default"):
     if not token:
         return []
     items, seen = [], set()
@@ -122,7 +126,7 @@ def _handles(handles, topic, from_date, to_date, count_per, token, mentions):
             continue
         query = f"@{handle}" if mentions else f"from:{handle}"
         found, error = _search(query, from_date, to_date, token, count_per, topic,
-                               prefix="GXA" if mentions else "GXF")
+                               prefix="GXA" if mentions else "GXF", depth=depth)
         for item in found:
             if mentions and is_own_post(item['url'], handle):
                 continue
@@ -135,11 +139,11 @@ def _handles(handles, topic, from_date, to_date, count_per, token, mentions):
     return items
 
 
-def search_handles(handles, topic, from_date, to_date, *, count_per=8, token=""):
+def search_handles(handles, topic, from_date, to_date, *, count_per=8, token="", depth="default"):
     """Posts authored by a person, without requiring topic words in each post."""
-    return _handles(handles, topic, from_date, to_date, count_per, token, False)
+    return _handles(handles, topic, from_date, to_date, count_per, token, False, depth)
 
 
-def search_mentions(handles, from_date, to_date, *, topic="", count_per=5, token=""):
+def search_mentions(handles, from_date, to_date, *, topic="", count_per=5, token="", depth="default"):
     """Posts mentioning a person, excluding that person's own posts."""
-    return _handles(handles, topic, from_date, to_date, count_per, token, True)
+    return _handles(handles, topic, from_date, to_date, count_per, token, True, depth)

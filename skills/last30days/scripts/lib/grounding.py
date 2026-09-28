@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 from . import dates, env, http, parallel_mcp, schema, web_search_keyless
@@ -203,6 +204,82 @@ def parallel_search(
     return items, artifact
 
 
+# ---------------------------------------------------------------------------
+# TinyFish Search API
+# ---------------------------------------------------------------------------
+
+def tinyfish_search(
+    query: str, date_range: tuple[str, str], api_key: str, count: int = 5,
+) -> tuple[list[dict], dict]:
+    url = (
+        "https://api.search.tinyfish.ai?"
+        + urllib.parse.urlencode(
+            {
+                "query": query,
+                "from_date": date_range[0],
+                "to_date": date_range[1],
+                "purpose": "Find recent discussion, news, and community coverage of the query",
+            }
+        )
+    )
+    data = http.request("GET", url, headers={"X-API-Key": api_key}, timeout=20)
+    # TinyFish date fields are sparse/relative and the API's own from/to params
+    # are advisory, so filter first, then slice — an undated early result must
+    # not displace a dated later one.
+    items = []
+    for i, r in enumerate(data.get("results") or []):
+        if not isinstance(r, dict):
+            continue
+        url_i = r.get("url", "")
+        if not url_i:
+            continue
+        pub_date = _parse_tinyfish_date(str(r.get("date") or ""))
+        if not _in_date_range(pub_date, date_range):
+            continue
+        items.append({
+            "id": f"WT{i + 1}",
+            "title": r.get("title", ""),
+            "url": url_i,
+            "source_domain": _domain(url_i),
+            "snippet": r.get("snippet", ""),
+            "date": pub_date,
+            "relevance": 0.8,
+            "why_relevant": "TinyFish web search",
+        })
+    items = items[:count]
+    artifact = {"label": "tinyfish", "webSearchQueries": [query], "resultCount": len(items)}
+    return items, artifact
+
+
+_TINYFISH_REL_RE = re.compile(
+    r"^(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago$", re.IGNORECASE
+)
+_TINYFISH_REL_DAYS = {
+    "second": 0, "minute": 0, "hour": 0,
+    "day": 1, "week": 7, "month": 30, "year": 365,
+}
+
+
+def _parse_tinyfish_date(raw: str) -> str | None:
+    """Parse TinyFish result dates: 'Aug 30, 2026' or relative '3 days ago'."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    normalized = _normalize_date(raw)
+    if normalized:
+        return normalized
+    for fmt in ("%b %d, %Y", "%B %d, %Y"):
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except ValueError:
+            continue
+    m = _TINYFISH_REL_RE.match(raw)
+    if m:
+        days = int(m.group(1)) * _TINYFISH_REL_DAYS[m.group(2).lower()]
+        return (datetime.now().date() - timedelta(days=days)).isoformat()
+    return None
+
+
 def _parse_serper_date(raw: str) -> str | None:
     if not raw:
         return None
@@ -239,6 +316,8 @@ def web_search(
             backend = "serper"
         elif config.get("PARALLEL_API_KEY"):
             backend = "parallel"
+        elif config.get("TINYFISH_API_KEY"):
+            backend = "tinyfish"
         elif env.keyless_web_allowed(config):
             # No paid key and the host has no native search -> use the keyless
             # floor. On a native-search host this branch is skipped (the model
@@ -272,6 +351,11 @@ def web_search(
         items, artifact = parallel_mcp.search(
             query, date_range, config.get("PARALLEL_API_KEY")
         )
+    elif backend == "tinyfish":
+        key = config.get("TINYFISH_API_KEY")
+        if not key:
+            raise RuntimeError("TINYFISH_API_KEY is required when web_backend='tinyfish'")
+        items, artifact = tinyfish_search(query, date_range, key)
     elif backend == "keyless":
         items, artifact = web_search_keyless.keyless_search(query, date_range, config)
     elif backend != "none":

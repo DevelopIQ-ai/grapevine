@@ -1894,6 +1894,8 @@ def diagnose(
         native_web_backend = "serper"
     elif config.get("PARALLEL_API_KEY"):
         native_web_backend = "parallel"
+    elif config.get("TINYFISH_API_KEY"):
+        native_web_backend = "tinyfish"
     providers_status = {
         "google": bool(google_key),
         "openai": bool(config.get("OPENAI_API_KEY")) and config.get("OPENAI_AUTH_STATUS") == env.AUTH_STATUS_OK,
@@ -2213,7 +2215,7 @@ def run(
         available.append("corpus")
     if web_backend == "none":
         available = [s for s in available if s != "grounding"]
-    elif web_backend in ("brave", "exa", "serper", "parallel", "parallel-mcp", "keyless") and "grounding" not in available:
+    elif web_backend in ("brave", "exa", "serper", "parallel", "parallel-mcp", "tinyfish", "keyless") and "grounding" not in available:
         available.append("grounding")
     if (
         hiring_signals_mode
@@ -4103,10 +4105,16 @@ def _run_supplemental_searches(
         token = config.get("GETXAPI_KEY", "") if primary == "getxapi" else env.get_xquik_token(config)
 
         def _from_lane(hs: list, count: int, and_topic: bool = False) -> tuple[list, bool]:
-            # xquik.search_handles doesn't support and_topic yet
+            # xquik.search_handles doesn't support and_topic yet; getxapi takes
+            # depth for its page budget, xquik ignores extra kwargs nowhere —
+            # keep the shared call shape and let each adapter use what it knows.
+            if primary == "getxapi":
+                return adapter.search_handles(hs, topic, from_date, to_date, count_per=count, token=token, depth=depth), False
             return adapter.search_handles(hs, topic, from_date, to_date, count_per=count, token=token), False
 
         def _about_lane(hs: list, count: int) -> tuple[list, bool]:
+            if primary == "getxapi":
+                return adapter.search_mentions(hs, from_date, to_date, topic=topic, count_per=count, token=token, depth=depth), False
             return adapter.search_mentions(hs, from_date, to_date, topic=topic, count_per=count, token=token), False
     else:
         return  # primary X backend has no handle-lane support (xai/xurl) or none configured
