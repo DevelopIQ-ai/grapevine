@@ -328,8 +328,9 @@ researcher) ride on every GetXAPI call:
   `LAST30DAYS_X_DIG_SOURCES=x` for X-only digging) and
   `LAST30DAYS_X_DIG_QUERIES` retunes the per-round count. Every round also
   fires deterministic seed queries mined from the corpus — recurring
-  capitalized names in retrieved titles plus the topic's own proper names —
-  so coverage does not depend on planner phrasing;
+  capitalized names across every lane's retrieved items plus the topic's own
+  proper names — so coverage does not depend on planner phrasing, and
+  recurring voices on X get account-scoped `from:` seeds;
   `LAST30DAYS_X_DIG_SEEDS` retunes the per-round seed count (default 3,
   `0` disables). Dig favors broad
   retrieval (bare entity names, category terms) over multi-keyword queries

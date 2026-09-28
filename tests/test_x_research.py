@@ -476,6 +476,41 @@ def test_dig_source_seeds_mine_entity_names(tmp_path, monkeypatch):
     assert "Prime Sandboxes" in calls
 
 
+def test_dig_source_seeds_cross_lane_corpus_and_authors(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("LAST30DAYS_X_DIG_SEEDS", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    calls = []
+
+    def search(query):
+        calls.append(query)
+        return {"items": []}
+
+    # Entity only present in the shared cross-lane corpus still seeds.
+    x_research.dig_source(
+        "hackernews", "sandbox launches", [], ["sandbox"],
+        search_fn=search, rounds=1,
+        seed_items=[
+            {"title": "Prime Sandboxes GA", "text": "", "author": ""},
+            {"title": "Prime Sandboxes docs", "text": "", "author": ""},
+        ],
+    )
+    assert "Prime Sandboxes" in calls
+
+    calls.clear()
+    # X lane also seeds from: queries for recurring voices in the corpus.
+    x_research.dig_source(
+        "x", "sandbox launches", [], ["sandbox"],
+        search_fn=search, rounds=1,
+        seed_items=[
+            {"author_handle": "PrimeIntellect", "text": "a"},
+            {"author_handle": "PrimeIntellect", "text": "b"},
+        ],
+    )
+    assert "from:PrimeIntellect" in calls
+
+
 def test_dig_source_judge_drops_low_scores(tmp_path, monkeypatch):
     class FakeJudge:
         MAX_CANDIDATES = 40

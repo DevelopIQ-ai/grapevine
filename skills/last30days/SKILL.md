@@ -173,8 +173,9 @@ rounds by default; it needs a planner key (`AI_GATEWAY_API_KEY` or
 `LAST30DAYS_X_DIG_SOURCES` narrows which lanes dig (default all three) and
 `LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3). Each round
 also fires deterministic seed queries mined from the hits so far — recurring
-capitalized names in titles plus the topic's own proper names — so planner
-phrasing can't gate whole vendors (`LAST30DAYS_X_DIG_SEEDS`, default 3/round,
+capitalized names across *every* lane's corpus plus the topic's own proper
+names — so planner phrasing can't gate whole vendors, and recurring voices on
+X get `from:` account-seed queries (`LAST30DAYS_X_DIG_SEEDS`, default 3/round,
 0 disables). Dig queries go broad on purpose — every retrieved item is relevance-classified by Jev
 before merging, so off-topic hits are dropped (`LAST30DAYS_X_DIG_JEV=0` turns
 the filter off). Whatever Jev keeps then goes through a second-stage Judge —

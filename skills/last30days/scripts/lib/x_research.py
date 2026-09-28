@@ -409,6 +409,7 @@ def _seed_queries(
     tried_norm: set,
     *,
     max_seeds: int,
+    author_prefix: str | None = None,
 ) -> list[str]:
     """Deterministic broad queries mined from the corpus so far.
 
@@ -416,12 +417,15 @@ def _seed_queries(
     because nobody typed its name. Seeds remove the luck: every round, the
     most frequent capitalized phrases in retrieved titles/text plus the
     topic's own proper names become bare queries, deduped against everything
-    already tried. Jev+judge keep the noise cheap.
+    already tried. Jev+judge keep the noise cheap. When ``author_prefix``
+    is set (``from:`` on X), recurring authors get account-scoped seeds — a
+    from:lane catches a launch announcement regardless of wording.
     """
     if max_seeds <= 0:
         return []
     counts: Counter[str] = Counter()
-    for it in items[-200:]:
+    authors: Counter[str] = Counter()
+    for it in items[-400:]:
         if not isinstance(it, dict):
             continue
         text = " ".join(
@@ -440,6 +444,12 @@ def _seed_queries(
             ):
                 continue
             counts[phrase] += 1
+        if author_prefix:
+            handle = str(
+                it.get("author_handle") or it.get("author") or ""
+            ).strip().lstrip("@")
+            if 2 <= len(handle) <= 30 and " " not in handle:
+                authors[handle] += 1
     seeds: list[str] = []
 
     def _take(phrase: str) -> None:
@@ -451,6 +461,10 @@ def _seed_queries(
     # Recurring names in hits first — strongest novelty signal.
     for phrase, _ in counts.most_common(20):
         _take(phrase)
+    # Recurring voices get account-scoped seeds.
+    if author_prefix:
+        for handle, _ in authors.most_common(10):
+            _take(f"{author_prefix}{handle}")
     # Then the topic's own proper names as a guaranteed floor.
     for match in _PROPER_RUN.finditer(topic):
         phrase = " ".join(match.group(0).split()).strip(".,:;!?-")
@@ -472,6 +486,7 @@ def dig_source(
     ledger: "Ledger | None" = None,
     timeout: int = 60,
     context_note: str | None = None,
+    seed_items: list[dict] | None = None,
 ) -> tuple[list[dict], list[str], dict]:
     """LLM-steered iterative dig over any search lane.
 
@@ -586,12 +601,15 @@ def dig_source(
             if ledger and found_ids:
                 ledger.record_page(ledger_key, lane, found_ids, None, False)
 
-        # Deterministic coverage floor: entity phrases mined from the hits
-        # so far plus the topic's own proper names — runs every round so
-        # planner phrasing luck can't gate whole categories of finds.
+        # Deterministic coverage floor: entity phrases mined from this
+        # lane's hits, the shared cross-lane corpus, and fresh dig finds —
+        # an entity surfacing on HN seeds an X query too.
         for query in _seed_queries(
-            topic, interim_items + new_items, tried_norm,
+            topic,
+            interim_items + list(seed_items or []) + new_items,
+            tried_norm,
             max_seeds=seeds_per_round,
+            author_prefix="from:" if lane == "x" else None,
         ):
             _run_query(query)
 
@@ -640,6 +658,7 @@ def dig(
     gate: "DailyGate | None" = None,
     ledger: "Ledger | None" = None,
     timeout: int = 60,
+    seed_items: list[dict] | None = None,
 ) -> tuple[list[dict], list[str], dict]:
     """LLM-steered iterative dig over GetXAPI.
 
@@ -664,7 +683,7 @@ def dig(
     return dig_source(
         "x", topic, interim_items, tried_queries,
         search_fn=_search, rounds=rounds, environ=environ, gate=gate,
-        timeout=timeout,
+        timeout=timeout, seed_items=seed_items,
     )
 
 

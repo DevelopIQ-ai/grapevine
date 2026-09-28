@@ -4182,6 +4182,17 @@ def _run_supplemental_searches(
                 tried = [
                     sq.search_query for sq in plan.subqueries if sq.search_query
                 ]
+                # Cross-lane seed corpus: every retrieved item from every
+                # source — an entity surfacing on HN/web seeds X queries.
+                seed_corpus = [
+                    {
+                        "title": it.title or "",
+                        "text": it.body or "",
+                        "author_handle": it.author or "",
+                    }
+                    for items in bundle.items_by_source.values()
+                    for it in items
+                ]
                 dig_items, dig_warnings, dig_stats = x_research.dig(
                     ranking_query or topic,
                     interim,
@@ -4191,6 +4202,7 @@ def _run_supplemental_searches(
                     depth=depth,
                     token=getx_token,
                     rounds=dig_rounds,
+                    seed_items=seed_corpus,
                 )
                 for warn in dig_warnings:
                     print(f"[X dig] {warn}", file=sys.stderr)
@@ -4524,6 +4536,17 @@ def _run_multi_source_dig(
         if item.url
     }
     ledger = x_research.Ledger(config)
+    # Cross-lane seed corpus: initial items from every source plus each
+    # lane's dig finds as they land — later lanes mine earlier discoveries.
+    seed_corpus = [
+        {
+            "title": it.title or "",
+            "text": it.body or "",
+            "author": it.author or "",
+        }
+        for items in bundle.items_by_source.values()
+        for it in items
+    ]
 
     for source, label, search_fn in lane_defs:
         interim = [
@@ -4545,6 +4568,7 @@ def _run_multi_source_dig(
                 search_fn=search_fn,
                 rounds=dig_rounds,
                 ledger=ledger,
+                seed_items=seed_corpus,
             )
         except Exception as exc:
             print(f"[{label}] dig failed: {exc}", file=sys.stderr)
@@ -4559,6 +4583,20 @@ def _run_multi_source_dig(
                 "jev_rejected": dig_stats.get("jev_rejected", 0),
                 "judge_rejected": dig_stats.get("judge_rejected", 0),
             }
+        for it in dig_items:
+            if isinstance(it, dict):
+                seed_corpus.append(
+                    {
+                        "title": str(it.get("title") or ""),
+                        "text": str(
+                            it.get("text") or it.get("body")
+                            or it.get("snippet") or ""
+                        ),
+                        "author": str(
+                            it.get("author") or it.get("author_handle") or ""
+                        ),
+                    }
+                )
         if not dig_items:
             continue
         normalized = _normalize_score_dedupe(
