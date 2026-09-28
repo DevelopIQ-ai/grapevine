@@ -316,11 +316,15 @@ researcher) ride on every GetXAPI call:
   `~/.config/last30days/x-research-ledger.json` records, per normalized query,
   the post ids already surfaced plus each product lane's cursor state. Posts a
   later run re-fetches are flagged `previously_seen` in item metadata instead
-  of being presented as new. `LAST30DAYS_X_LEDGER=0` disables it.
+  of being presented as new. `LAST30DAYS_X_LEDGER=0` disables it. Its bounds
+  are tunable: `LAST30DAYS_X_LEDGER_MAX_QUERIES` (default 400 queries
+  remembered) and `LAST30DAYS_X_LEDGER_MAX_IDS` (default 2000 post ids per
+  query); `0` lifts either cap.
 - **LLM-steered dig (`--x-dig N`)** — after initial X retrieval, the discovery
   planner reviews the interim corpus and issues up to 3 follow-up GetXAPI
   queries per round (alternate phrasings, named entities, `from:`/`@` lanes for
-  recurring voices), for N rounds. Follow-ups merge under an `x-dig` subquery
+  recurring voices), for N rounds; `LAST30DAYS_X_DIG_QUERIES` retunes the
+  per-round count. Follow-ups merge under an `x-dig` subquery
   label and honor the gate and ledger. Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
