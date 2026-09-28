@@ -205,6 +205,12 @@ def _resolve_depth_settings(depth: str, config: dict[str, Any]) -> dict[str, int
     cap (`--max-source-fetches`) is applied separately at the fetch site.
     """
     settings = dict(DEPTH_SETTINGS[depth])
+    # Ultra effort (config marker set by --effort ultra): widest candidate pool
+    # the engine supports. Explicit --max-* caps still override below.
+    if config.get("_ultra"):
+        settings["per_stream_limit"] = 30
+        settings["pool_limit"] = 120
+        settings["rerank_limit"] = 120
     # `is not None` (not truthiness) so an explicit 0 is honored as a real lower
     # bound rather than ignored as "unset" — matches how main() stashes these.
     max_per_source = config.get("_max_per_source")

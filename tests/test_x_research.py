@@ -61,6 +61,18 @@ def test_gate_budget_blocks(tmp_path, monkeypatch):
     assert gate.check() == "daily budget reached (2 calls/day)"
 
 
+def test_gate_run_cap_blocks_across_instances(tmp_path, monkeypatch):
+    x_research.DailyGate._run_calls = 0
+    monkeypatch.setenv("LAST30DAYS_MAX_X_CALLS", "2")
+    gate = x_research.DailyGate()
+    gate.charge()
+    gate.charge()
+    assert gate.check() == "run call cap reached (2 calls this run)"
+    # getxapi builds a fresh gate per call site; the cap must still hold.
+    assert x_research.DailyGate().check() == "run call cap reached (2 calls this run)"
+    x_research.DailyGate._run_calls = 0
+
+
 def test_gate_latch_blocks_until_retry_window(tmp_path):
     gate = x_research.DailyGate()
     gate.latch()

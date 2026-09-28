@@ -103,11 +103,17 @@ class DailyGate:
     latch window short-circuits instead of spending against a saturated key.
     """
 
+    # Per-process call counter shared by every gate instance in the run —
+    # getxapi constructs a fresh gate per call site, so the run cap cannot
+    # live on any one instance or in the day-scoped state file.
+    _run_calls: int = 0
+
     def __init__(self, environ=None):
         env_map = os.environ if environ is None else environ
         state_dir = _state_dir()
         self._path = state_dir / GATE_FILE if state_dir else None
         self._budget = _env_int("LAST30DAYS_GETXAPI_DAILY_BUDGET", DEFAULT_DAILY_BUDGET)
+        self._max_run = _env_int("LAST30DAYS_MAX_X_CALLS", 0)
         self._state: dict[str, Any] = {}
         if self._path:
             self._state = _read_json(self._path)
@@ -125,6 +131,8 @@ class DailyGate:
 
     def check(self) -> str | None:
         """Return a block reason, or None when a call may proceed."""
+        if self._max_run > 0 and type(self)._run_calls >= self._max_run:
+            return f"run call cap reached ({self._max_run} calls this run)"
         if self._path is None:
             return None
         retry_until = self._state.get("retry_until")
@@ -140,6 +148,7 @@ class DailyGate:
 
     def charge(self) -> None:
         """Record one GetXAPI HTTP call."""
+        type(self)._run_calls += 1
         if self._path is None:
             return
         day = self._day()

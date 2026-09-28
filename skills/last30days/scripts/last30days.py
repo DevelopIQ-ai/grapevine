@@ -83,6 +83,21 @@ def _cleanup_children() -> None:
 atexit.register(_cleanup_children)
 
 
+_EFFORT_TO_DEPTH = {"low": "quick", "normal": "default", "high": "deep", "ultra": "deep"}
+
+
+def _resolve_depth(args: argparse.Namespace) -> tuple[str, bool]:
+    """Map --effort/--deep/--quick to an engine depth. Returns (depth, ultra).
+
+    Ultra runs the engine's deep profile; the ``_ultra`` config marker and
+    env defaults applied in main() widen the dig fan-out beyond deep.
+    """
+    effort = getattr(args, "effort", None)
+    if effort:
+        return _EFFORT_TO_DEPTH[effort], effort == "ultra"
+    return "deep" if args.deep else "quick" if args.quick else "default", False
+
+
 def parse_meta_ads_page(raw: str) -> str:
     """Extract an Ad Library page id from a flag value, or "" if there is none.
 
@@ -671,6 +686,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--search", help="Comma-separated source list")
     parser.add_argument("--quick", action="store_true", help="Lower-latency retrieval profile")
     parser.add_argument("--deep", action="store_true", help="Higher-recall retrieval profile")
+    parser.add_argument(
+        "--effort",
+        choices=["low", "normal", "high", "ultra"],
+        default=None,
+        help="Effort mode: low = --quick, normal = default, high = --deep, ultra = deep plus "
+        "maximum dig fan-out (more rounds, more queries per round, deeper paging).",
+    )
+    parser.add_argument(
+        "--max-calls",
+        type=int,
+        default=None,
+        help="Hard stop: cap GetXAPI calls this run (1 call = $0.001; --max-calls 500 ~= $0.50). "
+        "Equivalent to LAST30DAYS_MAX_X_CALLS; the flag wins.",
+    )
     freshness_group = parser.add_mutually_exclusive_group()
     freshness_group.add_argument(
         "--verify-freshness",
@@ -2050,7 +2079,13 @@ def _run_discover(args: argparse.Namespace, config: dict[str, object]) -> int:
         return 2
     requested_sources, enrich_requested_sources = boundary
     subreddits = _discover_subreddits(args)
-    depth = "deep" if args.deep else "quick" if args.quick else "default"
+    depth, _ultra = _resolve_depth(args)
+    if _ultra:
+        config["_ultra"] = True
+        os.environ.setdefault("LAST30DAYS_X_DIG_QUERIES", "5")
+        os.environ.setdefault("LAST30DAYS_GETXAPI_MAX_PAGES", "40")
+    if args.max_calls is not None:
+        os.environ["LAST30DAYS_MAX_X_CALLS"] = str(args.max_calls)
     try:
         report = pipeline.run_discover(
             domain=domain,
@@ -2110,7 +2145,7 @@ def _run_discover_nominate(args: argparse.Namespace, config: dict[str, object]) 
         result = pipeline.run_discover_nominate(
             domain=domain,
             config=config,
-            depth="deep" if args.deep else "quick" if args.quick else "default",
+            depth=_resolve_depth(args)[0],
             requested_sources=requested_sources,
             mock=args.mock,
             subreddits=_discover_subreddits(args),
@@ -3665,7 +3700,7 @@ def _main(
             )
             return 2
         from lib import hosted
-        depth = "deep" if args.deep else "quick" if args.quick else "default"
+        depth, _ultra = _resolve_depth(args)
         try:
             audience = _audience_register_for_run(args, config, None)
         except ValueError as exc:
@@ -3815,7 +3850,15 @@ def _main(
     progress = ui.ProgressDisplay(topic, show_banner=True)
     progress.start_processing()
 
-    depth = "deep" if args.deep else "quick" if args.quick else "default"
+    depth, _ultra = _resolve_depth(args)
+    if _ultra:
+        config["_ultra"] = True
+        # Ultra defaults: more dig fan-out, deeper GetXAPI paging. Explicit
+        # env/.env values still win (setdefault never overrides a user pin).
+        os.environ.setdefault("LAST30DAYS_X_DIG_QUERIES", "5")
+        os.environ.setdefault("LAST30DAYS_GETXAPI_MAX_PAGES", "40")
+    if args.max_calls is not None:
+        os.environ["LAST30DAYS_MAX_X_CALLS"] = str(args.max_calls)
     # CLI overrides for the depth profile's result caps (issue #716). Stashed on
     # config so pipeline.run() can apply them without widening its signature; the
     # comparison path inherits them via `entity_config = dict(config)`.
@@ -4068,7 +4111,9 @@ def _main(
                     config.get("LAST30DAYS_X_DIG_ROUNDS") or ""
                 )
             except (TypeError, ValueError):
-                _x_dig_rounds = 2 if depth == "deep" else 0
+                _x_dig_rounds = (
+                    5 if config.get("_ultra") else 2 if depth == "deep" else 0
+                )
         config["_x_dig_rounds"] = max(0, _x_dig_rounds)
 
         def _main_runner() -> schema.Report:

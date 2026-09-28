@@ -343,6 +343,19 @@ researcher) ride on every GetXAPI call:
   disables. Author name, bio, followers, and location from each post's author
   object now flow into item metadata for lead-flavored research, and kept
   posts carry a `jev_score` field when classification ran.
+- **Effort modes (`--effort low|normal|high|ultra`)** — one depth dial
+  expressed in user terms: `low` = `--quick`, `normal` = default, `high` =
+  `--deep`, `ultra` = the deep profile plus maximum dig fan-out (5 dig
+  rounds, 5 follow-up queries per round, 40-page GetXAPI lanes, 30/120
+  per-stream/ranked caps). Explicit pins still win: `LAST30DAYS_X_DIG_QUERIES`,
+  `LAST30DAYS_GETXAPI_MAX_PAGES`, `--x-dig N`, `--max-results`,
+  `--max-per-source` all override the ultra defaults.
+- **Run spend cap (`--max-calls N` / `LAST30DAYS_MAX_X_CALLS`)** — hard stop
+  on GetXAPI calls inside one run (default `0` = unlimited). At ~$0.001 per
+  call, `--max-calls 500` bounds X spend to roughly $0.50 for that run; the
+  flag wins over the env var. When the counter hits the cap every X lane and
+  dig round short-circuits with a gate reason; non-X sources are unaffected.
+  Independent of the daily budget — a fresh run gets the full cap again.
 
 **`LAST30DAYS_GETXAPI_EXACT_QUERY=1`** — process-environment opt-in that sends a
 generated query unchanged to GetXAPI rather than extracting and expanding topic

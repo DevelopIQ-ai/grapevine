@@ -177,6 +177,22 @@ before merging, so off-topic hits are dropped (`LAST30DAYS_X_DIG_JEV=0` turns
 the filter off). Jev-passed posts are also exempt from the lexical relevance
 floor and the ranked-pool cap, so a classifier-approved post can't be cut by
 weaker downstream filters.
+
+**Effort modes.** `--effort low|normal|high|ultra` is the depth dial the model
+translates from user intent: low = `--quick`, normal = default, high = `--deep`,
+and **ultra** = deep plus maximum dig fan-out — 5 dig rounds by default, 5
+follow-up queries per round, 40-page GetXAPI lanes, and the widest candidate
+pool (30 per-stream / 120 ranked). Use ultra for "find everything / don't miss
+anything / I don't care about cost" asks; it spends more API calls and more
+wall-clock than deep. Explicit env pins (`LAST30DAYS_X_DIG_QUERIES`,
+`LAST30DAYS_GETXAPI_MAX_PAGES`, `--x-dig N`) still override the ultra defaults.
+
+**Spend hard stop.** `--max-calls N` (or `LAST30DAYS_MAX_X_CALLS`) caps the
+GetXAPI calls a single run may make — every call is ~$0.001, so
+`--max-calls 500` ≈ $0.50 worst-case X spend for that run. Once the counter
+hits the cap every X lane and dig round short-circuits; other sources keep
+running. For "don't spend more than $X" asks, translate dollars to calls
+(1 call = $0.001) and pass the flag.
 Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
 default 800) plus a five-minute latch after any provider 429, and a cross-run
 ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts
