@@ -4200,6 +4200,7 @@ def _run_supplemental_searches(
                         "queries": dig_stats.get("queries_run", 0),
                         "new_items": dig_stats.get("new_items", 0),
                         "jev_rejected": dig_stats.get("jev_rejected", 0),
+                        "judge_rejected": dig_stats.get("judge_rejected", 0),
                     }
                 if dig_items:
                     normalized = _normalize_score_dedupe(
@@ -4230,7 +4231,10 @@ def _run_supplemental_searches(
                         for item in normalized:
                             if item.url:
                                 existing_urls.add(item.url)
-                        rejected = dig_stats.get("jev_rejected", 0)
+                        rejected = (
+                            dig_stats.get("jev_rejected", 0)
+                            + dig_stats.get("judge_rejected", 0)
+                        )
                         print(
                             f"[X dig] {dig_stats.get('queries_run', 0)} follow-up "
                             f"queries surfaced {len(normalized)} new posts"
@@ -4553,6 +4557,7 @@ def _run_multi_source_dig(
                 "queries": dig_stats.get("queries_run", 0),
                 "new_items": dig_stats.get("new_items", 0),
                 "jev_rejected": dig_stats.get("jev_rejected", 0),
+                "judge_rejected": dig_stats.get("judge_rejected", 0),
             }
         if not dig_items:
             continue
@@ -4581,7 +4586,10 @@ def _run_multi_source_dig(
         for item in normalized:
             if item.url:
                 existing_urls.add(item.url)
-        rejected = dig_stats.get("jev_rejected", 0)
+        rejected = (
+            dig_stats.get("jev_rejected", 0)
+            + dig_stats.get("judge_rejected", 0)
+        )
         print(
             f"[{label}] {dig_stats.get('queries_run', 0)} follow-up queries "
             f"surfaced {len(normalized)} new items"

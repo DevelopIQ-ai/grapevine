@@ -174,9 +174,14 @@ rounds by default; it needs a planner key (`AI_GATEWAY_API_KEY` or
 `LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3). Dig queries
 go broad on purpose — every retrieved item is relevance-classified by Jev
 before merging, so off-topic hits are dropped (`LAST30DAYS_X_DIG_JEV=0` turns
-the filter off). Jev-passed posts are also exempt from the lexical relevance
-floor and the ranked-pool cap, so a classifier-approved post can't be cut by
-weaker downstream filters.
+the filter off). Whatever Jev keeps then goes through a second-stage Judge —
+a small chat model (`DISCOVERY_JUDGE_MODEL`, default gpt-4.1-mini) that scores
+every survivor 0-100 in batched calls and drops anything under 50 as thin,
+spammy, or redundant (`LAST30DAYS_X_DIG_JUDGE=0` turns it off; a judge outage
+fails open and keeps the batch). Jev-passed posts are also exempt from the
+lexical relevance floor and the ranked-pool cap, so a classifier-approved
+post can't be cut by weaker downstream filters. Kept items carry `jev_score`
+and `judge_score` in metadata.
 
 **Effort modes.** `--effort low|normal|high|ultra` is the depth dial the model
 translates from user intent: low = `--quick`, normal = default, high = `--deep`,

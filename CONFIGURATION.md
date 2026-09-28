@@ -331,7 +331,13 @@ researcher) ride on every GetXAPI call:
   because every retrieved post is relevance-classified by Jev before merging
   — off-topic candidates are dropped rather than ranked;
   `LAST30DAYS_X_DIG_JEV=0` disables that classification pass (falls back to
-  keep-everything when no Jev key is configured). Jev-classified items are
+  keep-everything when no Jev key is configured). A second-stage Judge then
+  re-scores every survivor: a small chat model
+  (`DISCOVERY_JUDGE_API_KEY`/`DISCOVERY_JUDGE_BASE_URL`/`DISCOVERY_JUDGE_MODEL`,
+  defaulting to the planner's gateway key and gpt-4.1-mini) batches verdicts
+  0-100 and drops anything under 50 as thin, spammy, or redundant;
+  `LAST30DAYS_X_DIG_JUDGE=0` disables it and provider failures keep the
+  batch unjudged. Jev-classified items are
   exempt from the downstream lexical relevance floor, the entity-miss prune,
   and the fused-pool cap — a post the classifier passed is never silently
   re-dropped by a weaker filter. Follow-ups merge under `x-dig`, `hn-dig`,
@@ -342,7 +348,7 @@ researcher) ride on every GetXAPI call:
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
   disables. Author name, bio, followers, and location from each post's author
   object now flow into item metadata for lead-flavored research, and kept
-  posts carry a `jev_score` field when classification ran.
+  posts carry `jev_score` and `judge_score` fields when those stages ran.
 - **Effort modes (`--effort low|normal|high|ultra`)** — one depth dial
   expressed in user terms: `low` = `--quick`, `normal` = default, `high` =
   `--deep`, `ultra` = the deep profile plus maximum dig fan-out (5 dig

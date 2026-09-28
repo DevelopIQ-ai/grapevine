@@ -413,7 +413,7 @@ def dig_source(
 
     warnings: list[str] = []
     stats = {"rounds_run": 0, "queries_run": 0, "new_items": 0,
-             "jev_rejected": 0}
+             "jev_rejected": 0, "judge_rejected": 0}
     if rounds <= 0 or search_fn is None:
         return [], warnings, stats
     env_map = os.environ if environ is None else environ
@@ -430,6 +430,15 @@ def dig_source(
             jev = discovery_providers.Jev(environ)
         except discovery_providers.ProviderError:
             jev = None
+
+    # Second-stage verdict: whatever Jev kept gets a finer keep/drop + score
+    # from a small chat model. Disabled with LAST30DAYS_X_DIG_JUDGE=0.
+    judge = None
+    if str(env_map.get("LAST30DAYS_X_DIG_JUDGE") or "1") != "0":
+        try:
+            judge = discovery_providers.Judge(environ)
+        except discovery_providers.ProviderError:
+            judge = None
 
     objective = (
         f"{label} relevant to: {topic}. Surface posts that the queries "
@@ -517,8 +526,11 @@ def dig_source(
         if not produced:
             # Planner asked for queries but all were repeats — treat as done.
             break
-        new_items.extend(_classify_round(round_items, jev, objective,
-                                       stats, warnings, timeout))
+        new_items.extend(_judge_round(
+            _classify_round(round_items, jev, objective, stats, warnings,
+                            timeout),
+            judge, objective, stats, warnings, timeout,
+        ))
     stats["new_items"] = len(new_items)
     return new_items, warnings, stats
 
@@ -550,7 +562,7 @@ def dig(
 
     if not token:
         return [], [], {"rounds_run": 0, "queries_run": 0, "new_items": 0,
-                        "jev_rejected": 0}
+                        "jev_rejected": 0, "judge_rejected": 0}
 
     def _search(query: str) -> dict:
         return getxapi.search_exact(
@@ -609,4 +621,54 @@ def _classify_round(items, jev, objective, stats, warnings, timeout):
             stats["jev_rejected"] += 1
             continue
         kept.append(item)
+    return kept
+
+
+# Judge verdicts below this band drop the item — the coarse filter already
+# passed, so a low score means thin/duplicate/spam signal, not just off-topic.
+JUDGE_DROP_BELOW = 50
+
+
+def _judge_round(items, judge, objective, stats, warnings, timeout):
+    """Second-stage verdict on one round's Jev survivors; <50 drops.
+
+    Fail-open like the classifier: a judge outage keeps the batch rather
+    than silently emptying it.
+    """
+    if not judge or not items:
+        return items
+    from . import discovery_providers
+    kept = []
+    for start in range(0, len(items), judge.MAX_CANDIDATES):
+        chunk = items[start:start + judge.MAX_CANDIDATES]
+        candidates = [
+            {
+                "i": offset,
+                "title": str(item.get("title") or ""),
+                "text": str(
+                    item.get("text") or item.get("body")
+                    or item.get("snippet") or ""
+                )[:1200],
+            }
+            for offset, item in enumerate(chunk)
+        ]
+        try:
+            scores = judge.judge(objective, candidates, timeout)
+        except discovery_providers.ProviderError as exc:
+            warnings.append(
+                f"Dig judge degraded: {exc}"
+                " (keeping remaining items unjudged)"
+            )
+            kept.extend(items[start:])
+            break
+        for offset, item in enumerate(chunk):
+            score = scores.get(offset)
+            if score is None:
+                kept.append(item)
+                continue
+            item["judge_score"] = score
+            if score < JUDGE_DROP_BELOW:
+                stats["judge_rejected"] += 1
+                continue
+            kept.append(item)
     return kept

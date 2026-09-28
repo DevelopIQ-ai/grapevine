@@ -450,6 +450,37 @@ def test_dig_source_jev_drops_off_topic(tmp_path, monkeypatch):
     assert stats["jev_rejected"] >= 1
 
 
+def test_dig_source_judge_drops_low_scores(tmp_path, monkeypatch):
+    class FakeJudge:
+        MAX_CANDIDATES = 40
+
+        def __init__(self, environ=None):
+            pass
+
+        def judge(self, objective, candidates, timeout):
+            return {
+                c["i"]: 90 if "substrate" in (c["title"] + c["text"]).lower() else 10
+                for c in candidates
+            }
+
+    monkeypatch.delenv("LAST30DAYS_X_DIG_JUDGE", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    monkeypatch.setattr(discovery_providers, "Judge", FakeJudge)
+    items, warnings, stats = x_research.dig_source(
+        "grounding", "sandbox launches", [], [],
+        search_fn=lambda q: {"items": [
+            {"id": "w1", "title": "Substrate sandbox runtime",
+             "url": "https://a.io"},
+            {"id": "w2", "title": "celebrity gossip",
+             "url": "https://b.io"},
+        ]},
+        rounds=1,
+    )
+    assert [i["id"] for i in items] == ["w1"]
+    assert items[0]["judge_score"] == 90
+    assert stats["judge_rejected"] == 1
+
+
 def test_dig_source_ledger_marks_previously_seen(tmp_path, monkeypatch):
     monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
     ledger = x_research.Ledger({})
