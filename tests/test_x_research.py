@@ -26,6 +26,9 @@ def _isolated_state_dir(tmp_path, monkeypatch):
     # Dig tests swap in fake classifiers explicitly; keep Jev off by default
     # so a stray real API key in the environment can't trigger network calls.
     monkeypatch.setenv("LAST30DAYS_X_DIG_JEV", "0")
+    # Neighborhood seeds (url:/conversation_id:/@) fire extra queries that
+    # older tests don't expect; they opt back in per-test.
+    monkeypatch.setenv("LAST30DAYS_X_DIG_NEIGHBOR", "0")
     yield
 
 
@@ -558,3 +561,79 @@ def test_dig_source_ledger_marks_previously_seen(tmp_path, monkeypatch):
         rounds=1, ledger=ledger,
     )
     assert second and all(i.get("previously_seen") for i in second)
+
+
+def test_x_neighborhood_queries_urls_convos_mentions():
+    items = [
+        {"url": "https://prime.dev/blog/launch",
+         "post_id": "900", "engagement": {"views": 5000}},
+        {"url": "https://github.com/primeintellect-ai/prime",
+         "mentioned_handles": ["primeintellect"]},
+        {"url": "https://x.com/alice/status/1", "post_id": "901",
+         "engagement": {"views": 50}},
+    ]
+    seeds = x_research._x_neighborhood_queries(items, set(), max_seeds=3)
+    # url: keeps the path (precise on big hosts); x.com links are skipped.
+    assert "url:prime.dev/blog/launch" in seeds
+    assert "conversation_id:900" in seeds  # hottest thread, by views
+    assert "conversation_id:901" not in seeds  # budget went to the hot one
+
+
+def test_x_neighborhood_queries_dedupes_and_caps():
+    items = [
+        {"url": "https://a.dev/x", "post_id": "1", "engagement": 10},
+        {"url": "https://b.dev/y", "post_id": "2", "engagement": 20},
+        {"url": "https://c.dev/z", "post_id": "3", "engagement": 30},
+        {"url": "https://d.dev/w", "post_id": "4", "engagement": 40},
+    ]
+    tried = {x_research.normalize_query("url:a.dev/x")}
+    seeds = x_research._x_neighborhood_queries(items, tried, max_seeds=2)
+    assert len(seeds) <= 2
+    assert "url:a.dev/x" not in seeds  # already tried
+    assert x_research._x_neighborhood_queries(items, set(),
+                                              max_seeds=0) == []
+
+
+def test_dig_source_x_lane_fires_neighborhood_seeds(tmp_path, monkeypatch):
+    monkeypatch.delenv("LAST30DAYS_X_DIG_NEIGHBOR", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    calls = []
+
+    def search(query):
+        calls.append(query)
+        return {"items": []}
+
+    x_research.dig_source(
+        "x", "sandbox launches", [], ["sandbox"],
+        search_fn=search, rounds=1,
+        seed_items=[
+            {"url": "https://prime.dev/launch", "post_id": "77",
+             "engagement": {"views": 999}},
+        ],
+    )
+    assert "url:prime.dev/launch" in calls
+
+    calls.clear()
+    # Non-X lanes never emit neighborhood seeds.
+    x_research.dig_source(
+        "hackernews", "sandbox launches", [], ["sandbox"],
+        search_fn=search, rounds=1,
+        seed_items=[{"url": "https://prime.dev/launch",
+                     "post_id": "77"}],
+    )
+    assert "url:prime.dev/launch" not in calls
+
+
+def test_dig_source_x_neighborhood_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_DIG_NEIGHBOR", "0")
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    calls = []
+
+    x_research.dig_source(
+        "x", "sandbox launches", [], ["sandbox"],
+        search_fn=lambda q: calls.append(q) or {"items": []},
+        rounds=1,
+        seed_items=[{"url": "https://prime.dev/launch",
+                     "post_id": "77"}],
+    )
+    assert "url:prime.dev/launch" not in calls

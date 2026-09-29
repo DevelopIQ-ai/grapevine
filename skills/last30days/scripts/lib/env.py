@@ -711,6 +711,14 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         ('LAST30DAYS_X_DIG_JUDGE', None),
         ('LAST30DAYS_X_DIG_SOURCES', None),
         ('LAST30DAYS_X_DIG_SEEDS', None),
+        # Enumeration lanes (hn-enum/github-enum): pull the whole window
+        # once, Jev judges every item. 0 disables; the max bounds per-lane
+        # Jev classify volume.
+        ('LAST30DAYS_X_DIG_ENUMERATE', None),
+        ('LAST30DAYS_X_DIG_ENUM_MAX', None),
+        # X-lane neighborhood seeds (url:/conversation_id:/@handle
+        # follow-ups per dig round). 0 disables.
+        ('LAST30DAYS_X_DIG_NEIGHBOR', None),
         ('LAST30DAYS_MAX_X_CALLS', None),
         ('LAST30DAYS_X_LEDGER', None),
         ('LAST30DAYS_X_LEDGER_MAX_QUERIES', None),
@@ -779,6 +787,7 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         'LAST30DAYS_X_DIG_JUDGE',
         'LAST30DAYS_X_DIG_SOURCES',
         'LAST30DAYS_X_DIG_SEEDS',
+        'LAST30DAYS_X_DIG_NEIGHBOR',
         'LAST30DAYS_MAX_X_CALLS',
         'LAST30DAYS_X_LEDGER',
         'LAST30DAYS_X_LEDGER_MAX_QUERIES',

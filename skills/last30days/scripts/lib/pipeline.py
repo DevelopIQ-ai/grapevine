@@ -58,6 +58,7 @@ from . import (
     reddit,
     reddit_listing,
     reddit_public,
+    reddit_rss,
     relevance,
     rerank,
     schema,
@@ -4533,6 +4534,72 @@ def _run_multi_source_dig(
         error = artifact.get("error") if isinstance(artifact, dict) else None
         return {"items": items or [], "error": error}
 
+    def _search_reddit(query: str) -> dict:
+        try:
+            posts = reddit_rss.search_rss(
+                query,
+                depth=depth if depth in ("quick", "default", "deep")
+                else "default",
+            )
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+        for post in posts or []:
+            if isinstance(post, dict) and "text" not in post:
+                post["text"] = post.get("selftext") or ""
+        return {"items": posts or []}
+
+    def _search_github(query: str, token: Any = None) -> dict:
+        try:
+            response = github.search_github(
+                query, from_date, to_date, depth=depth, token=token)
+            error = response.get("error") if isinstance(response, dict) else None
+            return {"items": github.parse_github_response(response) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_bluesky(query: str) -> dict:
+        try:
+            result = bluesky.search_bluesky(
+                query, from_date, to_date, depth=depth, config=config)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": bluesky.parse_bluesky_response(result) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_youtube(query: str) -> dict:
+        try:
+            result = youtube_yt.search_youtube(
+                query, from_date, to_date, depth=depth)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": youtube_yt.parse_youtube_response(result) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_arxiv(query: str) -> dict:
+        try:
+            result = arxiv.search_arxiv(
+                query, from_date, to_date, depth=depth)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": arxiv.parse_arxiv_response(
+                        result, query=ranking_query or topic) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_techmeme(query: str) -> dict:
+        try:
+            result = techmeme.search_techmeme(
+                query, from_date, to_date, depth=depth)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": techmeme.parse_techmeme_response(
+                        result, query=ranking_query or topic) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
     lane_defs: list[tuple[str, str, Any]] = []
     if (lanes is None or "hackernews" in lanes) and "hackernews" in available:
         lane_defs.append(("hackernews", "hn-dig", _search_hn))
@@ -4541,6 +4608,75 @@ def _run_multi_source_dig(
     # Google News is keyless — the lane is always diggable, no "available" gate.
     if lanes is None or "googlenews" in lanes or "news" in lanes:
         lane_defs.append(("googlenews", "news-dig", _search_news))
+    # Reddit RSS is keyless too — always diggable.
+    if lanes is None or "reddit" in lanes:
+        lane_defs.append(("reddit", "reddit-dig", _search_reddit))
+    # GitHub works keyless (anon tier); a token only raises rate limits.
+    if (lanes is None or "github" in lanes) and "github" in available:
+        gh_token = github.resolve_token(config.get("GITHUB_TOKEN"))
+        lane_defs.append(("github", "github-dig",
+                          lambda q: _search_github(q, gh_token)))
+    # Bluesky is gated on BSKY creds via "bluesky" in available.
+    if (lanes is None or "bluesky" in lanes) and "bluesky" in available:
+        lane_defs.append(("bluesky", "bluesky-dig", _search_bluesky))
+    # YouTube/arXiv/Techmeme are gated on their binaries via available.
+    if (lanes is None or "youtube" in lanes) and "youtube" in available:
+        lane_defs.append(("youtube", "yt-dig", _search_youtube))
+    if (lanes is None or "arxiv" in lanes) and "arxiv" in available:
+        lane_defs.append(("arxiv", "arxiv-dig", _search_arxiv))
+    if (lanes is None or "techmeme" in lanes) and "techmeme" in available:
+        lane_defs.append(("techmeme", "techmeme-dig", _search_techmeme))
+
+    # Enumeration lanes: completeness instead of queries — the lane's first
+    # query call returns the whole window slice (every HN story posted, every
+    # repo created) and later calls return empty, so Jev judges each item
+    # exactly once. LAST30DAYS_X_DIG_ENUMERATE=0 disables;
+    # LAST30DAYS_X_DIG_ENUM_MAX bounds per-lane Jev volume (default 4000).
+    if str(config.get("LAST30DAYS_X_DIG_ENUMERATE") or "1") != "0":
+        try:
+            enum_max = int(config.get("LAST30DAYS_X_DIG_ENUM_MAX") or 4000)
+        except (TypeError, ValueError):
+            enum_max = 4000
+
+        def _one_shot(fn: Any) -> Any:
+            state = {"done": False}
+
+            def _search(_query: str) -> dict:
+                if state["done"]:
+                    return {"items": []}
+                state["done"] = True
+                try:
+                    return fn()
+                except Exception as exc:
+                    return {"items": [], "error": str(exc)}
+
+            return _search
+
+        def _enum_hn() -> dict:
+            result = hackernews.enumerate_algolia_window(
+                from_date, to_date, max_items=enum_max)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {
+                "items": hackernews.parse_hackernews_response(
+                    result, query="") or [],
+                "error": error,
+            }
+
+        if (
+            (lanes is None or "hackernews_enum" in lanes or "hn_enum" in lanes)
+            and "hackernews" in available
+        ):
+            lane_defs.append(
+                ("hackernews_enum", "hn-enum", _one_shot(_enum_hn)))
+        if (lanes is None or "github_enum" in lanes) and "github" in available:
+            gh_enum_token = github.resolve_token(config.get("GITHUB_TOKEN"))
+            lane_defs.append((
+                "github_enum",
+                "github-enum",
+                _one_shot(lambda: github.enumerate_new_repos(
+                    from_date, to_date, token=gh_enum_token,
+                    max_items=min(enum_max, 200))),
+            ))
     if not lane_defs:
         return
 

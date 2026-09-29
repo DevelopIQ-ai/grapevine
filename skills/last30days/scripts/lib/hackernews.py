@@ -183,6 +183,81 @@ def search_algolia(
         return {"hits": [], "error": str(e)}
 
 
+def enumerate_algolia_window(
+    from_date: str,
+    to_date: str,
+    *,
+    max_items: int = 4000,
+    bucket_seconds: int = 43200,
+) -> Dict[str, Any]:
+    """Enumerate every HN story posted inside the window — completeness,
+    not queries.
+
+    Algolia caps any single search at 1,000 total hits (pagination is
+    disabled past the first page), and a busy day alone can exceed that,
+    so the window is walked in ~12h buckets that each stay under the cap.
+    When the grand total exceeds ``max_items``, every bucket is trimmed to
+    an even share so each day of the window stays represented rather than
+    the newest swamping the rest. Returns raw Algolia hits for the normal
+    parser; Jev judges relevance downstream.
+    """
+    from urllib.parse import urlencode
+
+    from_ts = _date_to_unix(from_date)
+    to_ts = _date_to_unix(to_date) + 86400
+    span = max(1, to_ts - from_ts)
+    n_buckets = max(1, -(-span // bucket_seconds))
+    buckets: List[List[Dict[str, Any]]] = []
+    errors: List[str] = []
+    for b in range(n_buckets):
+        lo = from_ts + b * bucket_seconds
+        hi = min(lo + bucket_seconds, to_ts)
+        bucket_hits: List[Dict[str, Any]] = []
+        page = 0
+        while True:
+            params = {
+                "tags": "story",
+                "numericFilters": f"created_at_i>{lo - 1},created_at_i<{hi}",
+                "hitsPerPage": "1000",
+                "page": str(page),
+            }
+            url = f"{ALGOLIA_SEARCH_BY_DATE_URL}?{urlencode(params)}"
+            try:
+                response = http.request("GET", url, timeout=30)
+            except Exception as exc:
+                errors.append(str(exc))
+                break
+            batch = response.get("hits") or []
+            bucket_hits.extend(batch)
+            page += 1
+            if not batch or page >= (response.get("nbPages") or 0):
+                break
+        buckets.append(bucket_hits)
+    total = sum(len(b) for b in buckets)
+    if total > max_items:
+        # Stride-sample each bucket so every hour of the window keeps
+        # coverage; then top up from skipped items in date order.
+        quota = max(1, max_items // n_buckets)
+        picked: List[Dict[str, Any]] = []
+        rest: List[Dict[str, Any]] = []
+        for b in buckets:
+            step = max(1, -(-len(b) // quota))
+            picked.extend(b[::step])
+            rest.extend(h for i, h in enumerate(b) if i % step)
+        hits = picked + rest[: max(0, max_items - len(picked))]
+        _log(
+            f"Window enumeration trimmed {total} -> {len(hits)} "
+            f"(cap {max_items})"
+        )
+    else:
+        hits = [h for b in buckets for h in b]
+    _log(f"Enumerated {len(hits)} stories across {n_buckets} buckets")
+    result: Dict[str, Any] = {"hits": hits}
+    if errors:
+        result["error"] = "; ".join(dict.fromkeys(errors))[:300]
+    return result
+
+
 def fetch_discovery_listings(
     from_date: str,
     to_date: str,

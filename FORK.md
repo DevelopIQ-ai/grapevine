@@ -35,10 +35,21 @@ For "dig deep / find everything" asks the engine adds `--x-dig N` (2 rounds on
 `--deep`, `--effort ultra` maxes it). After initial retrieval a planner reviews
 the interim corpus and fires follow-up queries on each diggable lane — X via
 GetXAPI (`from:`/`@` chases, broad entity queries), Hacker News via the keyless
-Algolia index, Google News via the keyless RSS search, and the web via the
-configured grounding backend. Deterministic
+Algolia index, Google News via the keyless RSS search, Reddit via its keyless
+search RSS, GitHub via its keyless anon search tier, and the web via the
+configured grounding backend. Bluesky joins when `BSKY_*` creds are set, and
+YouTube/arXiv/Techmeme join when their binaries (`yt-dlp`, `arxiv-pp-cli`,
+`techmeme-pp-cli`) are on PATH. Deterministic
 seed queries mined from the corpus (recurring names, `from:` author seeds) run
-every round so coverage doesn't depend on planner phrasing. Every retrieved
+every round so coverage doesn't depend on planner phrasing. Two enumeration
+lanes skip queries entirely: `hn-enum` pulls every HN story posted in the
+window and `github-enum` every public repo created in it — Jev judges the
+complete corpus rather than a phrasing-dependent sample
+(`LAST30DAYS_X_DIG_ENUMERATE`/`LAST30DAYS_X_DIG_ENUM_MAX` tune it). The X
+lane can't enumerate the platform, so it enumerates neighborhoods instead:
+`url:<page>` catches every post linking a found URL regardless of wording,
+`conversation_id:` pulls hot threads' replies, `@handle` sweeps account
+chatter (`LAST30DAYS_X_DIG_NEIGHBOR`). Every retrieved
 item is relevance-classified by Jev before merging; a second-stage Judge then
 scores survivors and drops thin or spammy ones. A cross-run ledger remembers
 every surfaced id so repeat runs accumulate instead of repeating.
