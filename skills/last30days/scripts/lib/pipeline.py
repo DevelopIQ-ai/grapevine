@@ -4600,7 +4600,6 @@ def _run_multi_source_dig(
         except Exception as exc:
             return {"items": [], "error": str(exc)}
 
-||||||| parent of e4753c5 (feat(dig): keyless Reddit lane — search RSS digs community threads free)
     lane_defs: list[tuple[str, str, Any]] = []
     if (lanes is None or "hackernews" in lanes) and "hackernews" in available:
         lane_defs.append(("hackernews", "hn-dig", _search_hn))
@@ -4678,7 +4677,6 @@ def _run_multi_source_dig(
                     from_date, to_date, token=gh_enum_token,
                     max_items=min(enum_max, 200))),
             ))
-||||||| parent of e4753c5 (feat(dig): keyless Reddit lane — search RSS digs community threads free)
     if not lane_defs:
         return
 
