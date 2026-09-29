@@ -71,6 +71,7 @@ def normalize_source_items(
         "amazon": _normalize_amazon,
         "meta_ads": _normalize_meta_ads,
         "grounding": _normalize_grounding,
+        "googlenews": _normalize_grounding,
         "xiaohongshu": _normalize_grounding,
         "github": _normalize_github,
         "perplexity": _normalize_grounding,
