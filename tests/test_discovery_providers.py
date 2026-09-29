@@ -339,3 +339,85 @@ def test_planner_decides_stop_with_explicit_coverage(monkeypatch):
 def test_planner_rejects_malformed_decision(monkeypatch,decision):
     fixture(monkeypatch,{'choices':[{'message':{'content':json.dumps(decision)}}]})
     with pytest.raises(p.ProviderError):p.Planner({'OPENAI_API_KEY':'test'}).plan('q',{}, {},2)
+
+
+def test_retry_recovers_transient_failure(monkeypatch):
+    calls = []
+
+    def post(url, key, body, timeout, headers=None):
+        calls.append(1)
+        if len(calls) < 3:
+            raise p._err("Provider request failed (HTTP 503).", retryable=True)
+        return {"ok": True}
+
+    sleeps = []
+    monkeypatch.setattr(p, "_post", post)
+    monkeypatch.setattr(p.time, "sleep", sleeps.append)
+    result = p._post_retried("https://x.test", "k", {}, 5, environ={})
+    assert result == {"ok": True}
+    assert len(calls) == 3
+    # exponential backoff: ~2s then ~4s, each with up to +50% jitter
+    assert len(sleeps) == 2
+    assert 2.0 <= sleeps[0] <= 3.0
+    assert 4.0 <= sleeps[1] <= 6.0
+
+
+def test_retry_exhaustion_raises_last_failure(monkeypatch):
+    calls = []
+
+    def post(url, key, body, timeout, headers=None):
+        calls.append(1)
+        raise p._err("Provider request failed (HTTP 503).", retryable=True)
+
+    monkeypatch.setattr(p, "_post", post)
+    monkeypatch.setattr(p.time, "sleep", lambda s: None)
+    with pytest.raises(p.ProviderError, match="503"):
+        p._post_retried(
+            "https://x.test", "k", {}, 5,
+            environ={"DISCOVERY_PROVIDER_RETRIES": "2"},
+        )
+    assert len(calls) == 3
+
+
+def test_retry_skips_deterministic_failure(monkeypatch):
+    calls = []
+
+    def post(url, key, body, timeout, headers=None):
+        calls.append(1)
+        raise p._err("Provider request failed (HTTP 402).", retryable=False)
+
+    monkeypatch.setattr(p, "_post", post)
+    monkeypatch.setattr(p.time, "sleep", lambda s: None)
+    with pytest.raises(p.ProviderError, match="402"):
+        p._post_retried("https://x.test", "k", {}, 5, environ={})
+    assert len(calls) == 1
+
+
+def test_retry_http_503_flagged_retryable_via_transport(monkeypatch):
+    import io
+
+    class Opener:
+        def open(self, request, timeout=None):
+            raise p.urllib.error.HTTPError(
+                request.full_url, 503, "unavailable", {}, io.BytesIO(b"x")
+            )
+
+    monkeypatch.setattr(p.urllib.request, "build_opener", lambda *args: Opener())
+    with pytest.raises(p.ProviderError) as exc:
+        p._post_transport("https://example.com", "test-key", {}, 2)
+    assert exc.value.retryable is True
+
+
+def test_retry_http_401_not_retryable_via_transport(monkeypatch):
+    import io
+
+    class Opener:
+        def open(self, request, timeout=None):
+            raise p.urllib.error.HTTPError(
+                request.full_url, 401, "unauthorized", {}, io.BytesIO(b"x")
+            )
+
+    monkeypatch.setattr(p.urllib.request, "build_opener", lambda *args: Opener())
+    with pytest.raises(p.ProviderError) as exc:
+        p._post_transport("https://example.com", "test-key", {}, 2)
+    assert exc.value.retryable is False

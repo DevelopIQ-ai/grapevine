@@ -634,7 +634,8 @@ def dig_source(
                 timeout,
             )
         except discovery_providers.ProviderError as exc:
-            warnings.append(f"{label} dig planner failed: {exc}")
+            stats["provider_failed"] = True
+            warnings.append(f"{label} dig planner failed after retries: {exc}")
             break
         previous_assessment = decision.get("coverage_summary")
         stats["rounds_run"] = round_no + 1
@@ -650,6 +651,9 @@ def dig_source(
                             timeout),
             judge, objective, stats, warnings, timeout,
         ))
+        if stats.get("provider_failed"):
+            warnings.append(f"{label} dig stopped: provider failure")
+            break
     stats["new_items"] = len(new_items)
     return new_items, warnings, stats
 
@@ -730,8 +734,11 @@ def _classify_round(items, jev, objective, stats, warnings, timeout):
                 "url": str(item.get("url") or item.get("hn_url") or ""),
             }, timeout)
         except discovery_providers.ProviderError as exc:
-            warnings.append(f"Dig classifier degraded: {exc}"
-                            " (keeping remaining items unclassified)")
+            stats["provider_failed"] = True
+            warnings.append(
+                f"Dig classifier failed after retries: {exc}"
+                " (keeping remaining items unclassified)"
+            )
             for remaining in items[idx:]:
                 remaining["jev_unclassified"] = True
                 kept.append(remaining)
@@ -777,8 +784,9 @@ def _judge_round(items, judge, objective, stats, warnings, timeout):
         try:
             scores = judge.judge(objective, candidates, timeout)
         except discovery_providers.ProviderError as exc:
+            stats["provider_failed"] = True
             warnings.append(
-                f"Dig judge degraded: {exc}"
+                f"Dig judge failed after retries: {exc}"
                 " (keeping remaining items unjudged)"
             )
             kept.extend(items[start:])

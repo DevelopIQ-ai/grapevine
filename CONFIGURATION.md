@@ -343,7 +343,13 @@ researcher) ride on every GetXAPI call:
   defaulting to the planner's gateway key and gpt-4.1-mini) batches verdicts
   0-100 and drops anything under 50 as thin, spammy, or redundant;
   `LAST30DAYS_X_DIG_JUDGE=0` disables it and provider failures keep the
-  batch unjudged. Jev-classified items are
+  batch unjudged. Every provider call (planner, Jev, Judge) retries
+  transient failures — HTTP 429/5xx, timeouts, transport errors — with
+  exponential backoff before giving up: `DISCOVERY_PROVIDER_RETRIES`
+  (default 3 extra attempts) and `DISCOVERY_PROVIDER_BACKOFF` (default
+  2s base, doubling per attempt plus jitter). A call that still fails
+  after its retries marks the lane `provider_failed` in the dig stats
+  and stops that lane rather than silently degrading. Jev-classified items are
   exempt from the downstream lexical relevance floor, the entity-miss prune,
   and the fused-pool cap — a post the classifier passed is never silently
   re-dropped by a weaker filter. Follow-ups merge under `x-dig`, `hn-dig`,

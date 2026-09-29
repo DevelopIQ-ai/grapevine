@@ -173,7 +173,7 @@ by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
 `LAST30DAYS_X_DIG_QUERIES` retunes follow-ups. Every item is Jev-classified
 (`LAST30DAYS_X_DIG_JEV=0` off), then a second Judge scores survivors
 0-100 and drops <50 (`LAST30DAYS_X_DIG_JUDGE=0` off,
-`DISCOVERY_JUDGE_*` retargets; outages keep items `jev_unclassified`).
+`DISCOVERY_JUDGE_*` retargets; calls retry w/ backoff, then fail hard).
 Judged items skip the lexical floor and pool cap, carrying `jev_score`/
 `judge_score` in metadata. **Effort:** `--effort low|normal|high|ultra`
 = `--quick`/default/`--deep`/max fan-out. **Spend:** `--max-calls N`/

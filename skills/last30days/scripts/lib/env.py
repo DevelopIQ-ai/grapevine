@@ -716,6 +716,10 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         ('LAST30DAYS_X_LEDGER_MAX_QUERIES', None),
         ('LAST30DAYS_X_LEDGER_MAX_IDS', None),
         ('LAST30DAYS_GETXAPI_DAILY_BUDGET', None),
+        # Dig provider retry budget: extra attempts on transient failures
+        # and the exponential-backoff base seconds.
+        ('DISCOVERY_PROVIDER_RETRIES', None),
+        ('DISCOVERY_PROVIDER_BACKOFF', None),
         # youtube_yt reads this lazily from os.environ; default android is
         # applied there when the key is absent. Empty disables.
         ('LAST30DAYS_YT_PLAYER_CLIENT', None),
@@ -780,6 +784,8 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         'LAST30DAYS_X_LEDGER_MAX_QUERIES',
         'LAST30DAYS_X_LEDGER_MAX_IDS',
         'LAST30DAYS_GETXAPI_DAILY_BUDGET',
+        'DISCOVERY_PROVIDER_RETRIES',
+        'DISCOVERY_PROVIDER_BACKOFF',
     ):
         value = config.get(key)
         # Empty LAST30DAYS_YT_PLAYER_CLIENT is a valid disable; other knobs

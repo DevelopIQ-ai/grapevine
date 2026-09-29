@@ -330,7 +330,8 @@ def test_dig_jev_fail_open_on_provider_error(tmp_path, monkeypatch):
     # both new items kept when the classifier is down (post ids dedupe across
     # the round's two queries, so 2 unique items reach the classifier)
     assert stats["new_items"] == 2
-    assert any("classifier degraded" in w for w in warnings)
+    assert stats["provider_failed"] is True
+    assert any("classifier failed after retries" in w for w in warnings)
 
 
 def test_dig_stops_on_gate(tmp_path, monkeypatch):

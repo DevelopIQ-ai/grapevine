@@ -4213,6 +4213,9 @@ def _run_supplemental_searches(
                         "new_items": dig_stats.get("new_items", 0),
                         "jev_rejected": dig_stats.get("jev_rejected", 0),
                         "judge_rejected": dig_stats.get("judge_rejected", 0),
+                        "provider_failed": bool(
+                            dig_stats.get("provider_failed")
+                        ),
                     }
                 if dig_items:
                     normalized = _normalize_score_dedupe(
@@ -4582,6 +4585,7 @@ def _run_multi_source_dig(
                 "new_items": dig_stats.get("new_items", 0),
                 "jev_rejected": dig_stats.get("jev_rejected", 0),
                 "judge_rejected": dig_stats.get("judge_rejected", 0),
+                "provider_failed": bool(dig_stats.get("provider_failed")),
             }
         for it in dig_items:
             if isinstance(it, dict):

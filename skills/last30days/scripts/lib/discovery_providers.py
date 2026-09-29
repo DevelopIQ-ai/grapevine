@@ -8,6 +8,7 @@ import json
 import math
 import multiprocessing
 import os
+import random
 import re
 import time
 import urllib.error
@@ -19,7 +20,20 @@ MAX_STATE_CHARS = 60_000
 
 
 class ProviderError(RuntimeError):
-    """Safe provider failure: never contains credential or response bodies."""
+    """Safe provider failure: never contains credential or response bodies.
+
+    ``retryable`` marks transient failures (429/5xx, timeouts, transport
+    errors) that an immediate retry may fix; deterministic failures
+    (4xx, bad config, malformed payloads) are not retried.
+    """
+
+    retryable = False
+
+
+def _err(message, retryable=False):
+    error = ProviderError(message)
+    error.retryable = retryable
+    return error
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -66,23 +80,29 @@ def _post_transport(url, key, body, timeout, headers=None):
     except urllib.error.HTTPError as exc:
         code = exc.code
         exc.close()
-        raise ProviderError(f"Provider request failed (HTTP {code}).") from None
+        raise _err(
+            f"Provider request failed (HTTP {code}).",
+            retryable=code == 429 or code >= 500,
+        ) from None
     except ProviderError:
         raise
     except Exception:  # noqa: BLE001 - never leak credentials from transport errors
-        raise ProviderError(
-            "Provider request failed or returned invalid JSON."
+        raise _err(
+            "Provider request failed or returned invalid JSON.",
+            retryable=True,
         ) from None
 
 
 def _request_worker(connection, url, key, body, timeout, headers):
     """Spawn-only worker; credentials travel through multiprocessing's private pipe."""
     try:
-        connection.send(("ok", _post_transport(url, key, body, timeout, headers)))
+        connection.send(
+            ("ok", _post_transport(url, key, body, timeout, headers), False)
+        )
     except ProviderError as exc:
-        connection.send(("error", str(exc)))
+        connection.send(("error", str(exc), exc.retryable))
     except Exception:  # noqa: BLE001 - never leak credentials from transport errors
-        connection.send(("error", "Provider request failed."))
+        connection.send(("error", "Provider request failed.", True))
     finally:
         connection.close()
 
@@ -106,15 +126,17 @@ def _bounded_request(worker, args, timeout):
         sender.close()
         left = deadline - time.monotonic()
         if left <= 0 or not receiver.poll(left):
-            raise ProviderError("Provider request timed out.")
+            raise _err("Provider request timed out.", retryable=True)
         try:
-            status, result = receiver.recv()
-        except (EOFError, OSError, ValueError):
-            raise ProviderError("Provider worker failed.") from None
+            message = receiver.recv()
+            status, result = message[0], message[1]
+            retryable = bool(message[2]) if len(message) > 2 else False
+        except (EOFError, OSError, ValueError, IndexError, TypeError, KeyError):
+            raise _err("Provider worker failed.", retryable=True) from None
         if time.monotonic() >= deadline:
-            raise ProviderError("Provider request timed out.")
+            raise _err("Provider request timed out.", retryable=True)
         if status != "ok":
-            raise ProviderError(result)
+            raise _err(result, retryable=retryable)
         return result
     finally:
         sender.close()
@@ -132,9 +154,53 @@ def _post(url, key, body, timeout, headers=None):
     )
 
 
+def _env_positive_int(environ, name, default, maximum):
+    env = os.environ if environ is None else environ
+    try:
+        value = int(env.get(name) or default)
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(value, maximum))
+
+
+def _env_positive_float(environ, name, default, maximum):
+    env = os.environ if environ is None else environ
+    try:
+        value = float(env.get(name) or default)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(value) or value < 0:
+        return default
+    return min(value, maximum)
+
+
+def _post_retried(url, key, body, timeout, headers=None, environ=None):
+    """_post with exponential backoff on transient failures.
+
+    Retries only ProviderErrors flagged retryable (429/5xx, timeouts,
+    transport blips) — a deterministic 4xx fails immediately. Total wait
+    stays bounded: DISCOVERY_PROVIDER_RETRIES extra attempts (default 3,
+    max 8) with backoff DISCOVERY_PROVIDER_BACKOFF * 2**n seconds
+    (default 2s, max 30s base) plus 0-50% jitter. The final attempt's
+    failure propagates as-is.
+    """
+    retries = _env_positive_int(environ, "DISCOVERY_PROVIDER_RETRIES", 3, 8)
+    base = _env_positive_float(environ, "DISCOVERY_PROVIDER_BACKOFF", 2.0, 30.0)
+    for attempt in range(retries + 1):
+        try:
+            return _post(url, key, body, timeout, headers)
+        except ProviderError as exc:
+            if attempt >= retries or not exc.retryable:
+                raise
+            delay = base * (2 ** attempt)
+            delay *= 1.0 + random.random() * 0.5
+            time.sleep(delay)
+
+
 class Planner:
     def __init__(self, environ=None):
         env = os.environ if environ is None else environ
+        self._environ = environ
         self.key = (
             env.get("DISCOVERY_PLANNER_API_KEY")
             or env.get("AI_GATEWAY_API_KEY")
@@ -179,7 +245,7 @@ class Planner:
             "A stop reason must explain why coverage and expected novelty justify completion, including any limitations. Never claim exhaustive coverage merely because several narrow queries were empty. "
             "Never weaken or change the objective or filters."
         )
-        data = _post(
+        data = _post_retried(
             self.base_url.rstrip("/") + "/chat/completions",
             self.key,
             {
@@ -201,6 +267,7 @@ class Planner:
                 "max_tokens": 2500,
             },
             timeout,
+            environ=self._environ,
         )
         try:
             result = json.loads(data["choices"][0]["message"]["content"])
@@ -249,6 +316,7 @@ class Planner:
 class Jev:
     def __init__(self, environ=None):
         env = os.environ if environ is None else environ
+        self._environ = environ
         self.provider = env.get("JEV_PROVIDER", "typesafe")
         if self.provider not in ("typesafe", "vercel"):
             raise ProviderError("JEV_PROVIDER must be typesafe or vercel.")
@@ -299,7 +367,7 @@ class Jev:
                 "Candidate exceeds Jev input limit; shorten it explicitly before evaluation."
             )
         if self.provider == "vercel":
-            data = _post(
+            data = _post_retried(
                 "https://ai-gateway.vercel.sh/v4/ai/evaluation-model",
                 self.key,
                 {"state": state, "questions": questions},
@@ -310,13 +378,15 @@ class Jev:
                     "ai-gateway-protocol-version": "0.0.1",
                     "ai-gateway-auth-method": "api-key",
                 },
+                environ=self._environ,
             )
         else:
-            data = _post(
+            data = _post_retried(
                 "https://api.typesafe.ai/v1/systemone",
                 self.key,
                 {"model": self.model, "state": state, "questions": questions},
                 timeout,
+                environ=self._environ,
             )
         try:
             answers = data["answers"]
@@ -375,6 +445,7 @@ class Judge:
 
     def __init__(self, environ=None):
         env = os.environ if environ is None else environ
+        self._environ = environ
         self.key = (
             env.get("DISCOVERY_JUDGE_API_KEY")
             or env.get("AI_GATEWAY_API_KEY")
@@ -415,7 +486,7 @@ class Judge:
             "array of {\"i\": integer index, \"score\": integer 0-100} covering "
             "every candidate index exactly once."
         )
-        data = _post(
+        data = _post_retried(
             self.base_url.rstrip("/") + "/chat/completions",
             self.key,
             {
@@ -433,6 +504,7 @@ class Judge:
                 "max_tokens": 2000,
             },
             timeout,
+            environ=self._environ,
         )
         try:
             result = json.loads(data["choices"][0]["message"]["content"])
