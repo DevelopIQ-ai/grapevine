@@ -114,7 +114,7 @@ Judged items skip the lexical floor and pool cap, carrying `jev_score`/
 = `--quick`/default/`--deep`/max fan-out. **Spend:** `--max-calls N`/
 `LAST30DAYS_MAX_X_CALLS` caps run GetXAPI calls; at cap X lanes stop.
 Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
-default 800) plus a five-minute latch after any provider 429, and a cross-run
+default 4000) plus a five-minute latch after any provider 429, and a cross-run
 ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts
 as `previously_seen` so repeat digs on a topic accumulate instead of
 re-reporting the same posts (`LAST30DAYS_X_LEDGER=0` disables).

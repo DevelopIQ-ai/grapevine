@@ -224,7 +224,7 @@ Three pieces of research machinery (ported from the pixie-app GetXAPI
 researcher) ride on every GetXAPI call:
 
 - **Daily spend gate** — `~/.config/last30days/getxapi-usage.json` counts calls
-  per UTC day; `LAST30DAYS_GETXAPI_DAILY_BUDGET` sets the ceiling (default 800,
+  per UTC day; `LAST30DAYS_GETXAPI_DAILY_BUDGET` sets the ceiling (default 4000,
   `0` disables the budget). A provider 429 latches the gate for five minutes so
   every lane and dig round in that window skips GetXAPI instead of hammering a
   saturated key.
