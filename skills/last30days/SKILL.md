@@ -92,6 +92,9 @@ backend — plus Bluesky when `BSKY_*` creds are set and
 YouTube/arXiv/Techmeme when their binaries (`yt-dlp`, `arxiv-pp-cli`,
 `techmeme-pp-cli`) are on PATH — plus seed queries mined across lanes
 (recurring names, topic
+||||||| parent of e4753c5 (feat(dig): keyless Reddit lane — search RSS digs community threads free)
+(keyless RSS), and the web
+backend, plus seed queries mined across lanes (recurring names, topic
 proper names, `from:` author seeds on X; `LAST30DAYS_X_DIG_SEEDS` 3).
 Two enumeration lanes (`hn-enum`, `github-enum`) pull the whole date
 window — every HN story posted, every repo created — so Jev judges the
@@ -103,6 +106,8 @@ threads' replies, `@handle` catches chatter around recurring accounts
 (`LAST30DAYS_X_DIG_NEIGHBOR` 3/round, 0 off).
 Results merge under `x-dig`/`hn-dig`/`news-dig`/`reddit-dig`/`web-dig`/
 `github-dig`/`bluesky-dig`/`yt-dig`/`arxiv-dig`/`techmeme-dig`/`*-enum`; deep runs dig 2 rounds
+||||||| parent of e4753c5 (feat(dig): keyless Reddit lane — search RSS digs community threads free)
+Results merge under `x-dig`/`hn-dig`/`news-dig`/`web-dig`; deep runs dig 2 rounds
 by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
 `LAST30DAYS_X_DIG_SOURCES` narrows lanes and
 `LAST30DAYS_X_DIG_QUERIES` retunes follow-ups. Every item is Jev-classified
@@ -114,7 +119,7 @@ Judged items skip the lexical floor and pool cap, carrying `jev_score`/
 = `--quick`/default/`--deep`/max fan-out. **Spend:** `--max-calls N`/
 `LAST30DAYS_MAX_X_CALLS` caps run GetXAPI calls; at cap X lanes stop.
 Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
-default 800) plus a five-minute latch after any provider 429, and a cross-run
+default 4000) plus a five-minute latch after any provider 429, and a cross-run
 ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts
 as `previously_seen` so repeat digs on a topic accumulate instead of
 re-reporting the same posts (`LAST30DAYS_X_LEDGER=0` disables).

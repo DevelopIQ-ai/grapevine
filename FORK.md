@@ -40,6 +40,9 @@ search RSS, GitHub via its keyless anon search tier, and the web via the
 configured grounding backend. Bluesky joins when `BSKY_*` creds are set, and
 YouTube/arXiv/Techmeme join when their binaries (`yt-dlp`, `arxiv-pp-cli`,
 `techmeme-pp-cli`) are on PATH. Deterministic
+||||||| parent of e4753c5 (feat(dig): keyless Reddit lane — search RSS digs community threads free)
+Algolia index, Google News via the keyless RSS search, and the web via the
+configured grounding backend. Deterministic
 seed queries mined from the corpus (recurring names, `from:` author seeds) run
 every round so coverage doesn't depend on planner phrasing. Two enumeration
 lanes skip queries entirely: `hn-enum` pulls every HN story posted in the
