@@ -1,9 +1,9 @@
 {
- "name": "ai-browsers-oct-2026",
+ "name": "ai-browsers-oct-2025",
  "topic": "AI browser launches and news last week",
- "from_date": "2026-10-01",
- "to_date": "2026-10-08",
- "args": ["--deep", "--x-dig", "3", "--as-of", "2026-10-08"],
+ "from_date": "2025-10-01",
+ "to_date": "2025-10-08",
+ "args": ["--deep", "--x-dig", "3", "--as-of", "2025-10-08"],
  "intent": "news",
  "freshness_mode": "strict_recent",
  "cluster_mode": "none",
