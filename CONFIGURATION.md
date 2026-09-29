@@ -17,111 +17,27 @@ This is a focused **configuration reference** maintained alongside the engine. T
 
 ---
 
-## Iterative discovery with Jev (DevelopIQ fork)
+## Dig and Jev provider credentials
 
-Input limits: the objective is at most 8,000 characters; each semantic condition is
-at most 2,000. The JSON-encoded objective plus criteria must fit 40,000 characters.
-Evidence is explicitly bounded to fit Jev: at most 24,000 body characters, a 2,000-character
-title, and five attributed comment excerpts of up to 500 characters. The body may be
-shortened further for long criteria; `evidence_truncated` records clipping.
-
-Use `/last30days find developers who tried an AI coding tool and want an alternative`.
-Describe filters in plain language alongside the objective; the host translates them into
-`discover.py` arguments. Ordinary `/last30days <topic>` still runs one research pass.
-This is separate from the upstream `last30days.py --discover` topic-brief workflow.
-
-For scripting or development, from the repository root:
-
-```bash
-python3 skills/last30days/scripts/discover.py \
-  "Developers who tried an AI coding tool and are looking for an alternative" \
-  --sources x,reddit,hackernews --days 30 \
-  --include "Describes a problem they personally experienced" \
-  --exclude "Promotes their own product" --language English \
-  --output ./discovery-results.json
-```
-
-A general model generates queries, the existing engine retrieves candidates, and Jev
-judges the original objective and each semantic filter independently. The planner gets
-feedback and searches again; it cannot relax your objective or filters. Source text is
-evidence, not instructions. No database, hosted worker, Trigger, or Supabase is required.
-
-| Argument | Default | Meaning |
-|---|---|---|
-| `objective` | required | Natural-language definition of a match |
-| `--sources` | `x,reddit,hackernews` | Comma-separated selection from `x`, `reddit`, `hackernews`, `youtube`, `github`, `bluesky`; source credentials/tools still apply |
-| `--days`, `--as-of` | `30`, current UTC date | Fixed inclusive date window, from `as-of - days` through `as-of`; unknown dates do not pass |
-| `--include`, `--exclude` | none | Repeatable semantic conditions; at most six additional conditions total, including language |
-| `--language` | none | Jev checks substantive content language; this is a semantic filter |
-| `--min-engagement` | `0` | Require a known likes, score, points, or GitHub stars value at least this large; views/followers do not count, unknown engagement fails when the minimum is positive |
-| `--queries-per-round` | `3` | One to three queries per batch; this does not limit the total number of rounds |
-| `--request-timeout` | `60` | Timeout in seconds for each planner or Jev network operation, not total runtime |
-| `--search-timeout` | `180` | Timeout in seconds for one engine invocation, not total runtime |
-| `--accept-threshold`, `--reject-threshold` | `0.8`, `0.2` | Accept only when every criterion reaches the acceptance threshold; reject when any criterion reaches or falls below the rejection threshold, provided evidence is sufficient |
-| `--evidence-threshold` | `0.8` | Evidence sufficiency must meet this threshold; otherwise keep the candidate uncertain even if a criterion received a confident “no” |
-| `--output` | `LAST30DAYS_MEMORY_DIR/discovery/<UTC-timestamp>-<id>.json` (defaults to `~/Documents/Last30Days` when unset) | JSON checkpoint containing results and run state; existing files require `--resume` |
-| `--resume` | none | Resume a version 2 checkpoint with its original configuration, history, and pending work |
-| `--emit` | `compact` | `compact` summary or `json` state |
-
-The planner decides when research is complete by considering coverage of the objective,
-results from different search directions, and whether further searches are likely to
-find new unique matches. There is no automatic total limit on accepted matches,
-rounds, calls, searches, runtime, or consecutive empty rounds, and no dollar cap.
-Provider charges continue until the planner stops, the user cancels, or an operation
-fails. Call counts describe activity; they are not comprehensive cost accounting.
-Repeated queries are skipped and reported back to the planner, not treated as an
-automatic completion signal. Individual search backends still retain their own
-per-invocation pagination and retrieval bounds.
-
-The discovery checkpoint location is controlled by `--output`; it does not use the
-ordinary engine report save-directory settings. Use `--resume ./discovery-results.json`
-to continue without repeating the objective or options. Overrides must exactly match
-the saved configuration. Legacy version 1 checkpoints are explicitly rejected;
-start a new run rather than restoring their old automatic stop settings.
-
-Checkpoints are saved atomically and retain candidates, decisions, probabilities,
-source statuses, query history, accepted IDs, activity counts, and pending work. Canonical URLs
-prevent repeated judging of the same result. Uncertain and pending candidates are not
-accepted matches. Jev judges the engine's supplied text, which may be an excerpt;
-it does not establish facts absent from that text or guarantee classification accuracy.
-
-A successful planner stop is recorded as `planner_complete`, with its
-`completion_reason` and coverage summary retained in the checkpoint. Operational
-failures and user cancellation leave incomplete checkpointed work; they are not
-successful completion. Per-operation timeouts prevent a single request from hanging,
-not a long investigation from continuing. The planner's coverage judgment is not a
-guarantee of exhaustive recall or classification accuracy.
-
-**`LAST30DAYS_SKIP_RUN_CACHE=1`** is a process-environment opt-in that prevents
-engine writes to shared `last-run.json` and `last-report.json`. Discovery sets this
-automatically so its subqueries do not replace the ordinary report used by drill
-and follow-up rendering. Existing source configuration remains available. Normal
-one-pass research continues writing its cache unless explicitly opted out.
-
-### Discovery provider credentials
-
-The planner and evaluator are separate. Configure these in the process environment
-used to launch discovery; never put real keys in commands, checkpoints, or this repo.
+The dig's planner and evaluator are separate providers. Configure these in the
+process environment or `~/.config/last30days/.env`; never put real keys in commands
+or this repo.
 
 | Variable | Purpose |
 |---|---|
 | `JEV_PROVIDER` | `typesafe` (default) for native TypeSafe, or `vercel` for AI Gateway |
 | `JEV_API_KEY` | Jev credential for the selected provider |
 | `TYPESAFE_API_KEY` | Native-provider fallback when `JEV_API_KEY` is absent |
-| `AI_GATEWAY_API_KEY` | Gateway Jev fallback and planner credential fallback |
+| `AI_GATEWAY_API_KEY` | Gateway Jev fallback and planner/judge credential fallback |
 | `DISCOVERY_PLANNER_API_KEY` | Planner credential; preferred over `AI_GATEWAY_API_KEY`, then `OPENAI_API_KEY` |
 | `DISCOVERY_PLANNER_BASE_URL` | HTTPS OpenAI-compatible base URL; defaults to `https://ai-gateway.vercel.sh/v1` when `AI_GATEWAY_API_KEY` is present, otherwise `https://api.openai.com/v1` |
 | `DISCOVERY_PLANNER_MODEL` | Defaults to `openai/gpt-4.1-mini` with Gateway present, otherwise `gpt-4.1-mini` |
+| `DISCOVERY_JUDGE_API_KEY` / `DISCOVERY_JUDGE_BASE_URL` / `DISCOVERY_JUDGE_MODEL` | Second-stage judge; defaults to the planner's credential, base URL, and `gpt-4.1-mini` |
 
 Native Jev uses `jev-latest`; Gateway uses `typesafe-ai/jev`. If overriding the planner
 credential while a Gateway key is also present, explicitly set the intended planner
 base URL and model. Retrieval uses the existing source configuration; for GetXAPI,
-set `GETXAPI_KEY` and `LAST30DAYS_X_BACKEND=getxapi`. Discovery sets
-`LAST30DAYS_GETXAPI_EXACT_QUERY=1` automatically so GetXAPI receives the generated
-query without topic extraction or expansion. The engine still replaces query date
-operators with the fixed configured date window. Discovery disables browser-cookie
-reads. Installed skills are copies: reinstall this fork to pick up the new entrypoint;
-editing a checkout does not update a previously installed skill automatically.
+set `GETXAPI_KEY` and `LAST30DAYS_X_BACKEND=getxapi`.
 
 ---
 
@@ -377,12 +293,9 @@ researcher) ride on every GetXAPI call:
 
 **`LAST30DAYS_GETXAPI_EXACT_QUERY=1`** — process-environment opt-in that sends a
 generated query unchanged to GetXAPI rather than extracting and expanding topic
-keywords. The fixed engine date window still replaces embedded date operators. The
-Jev discovery wrapper sets this automatically for its child engine; ordinary
-one-pass searches retain their usual expansion unless explicitly opted in. GetXAPI
-retains the full text returned by its provider instead of the shared parser’s
-500-character clip. Discovery itself caps candidate bodies at 24,000 characters
-and records `evidence_truncated` when it does so.
+keywords. The fixed engine date window still replaces embedded date operators.
+GetXAPI retains the full text returned by its provider instead of the shared
+parser’s 500-character clip.
 
 **X on cookie-less hosts.** Bird (the free X source) scrapes X using your logged-in browser cookies (`AUTH_TOKEN`/`CT0`), which agent hosts like OpenClaw, CI, or headless runs often can't supply — and scraping carries some account risk. On those, set `XQUIK_API_KEY` (or `XAI_API_KEY`) for full, ranked X coverage from a single API key: the same engagement-based ranking, first-party authorship, and handle (from/mentions) lanes the native X source gets. The official X API is the other keyed option: set `X_BEARER_TOKEN` and pin `LAST30DAYS_X_BACKEND=xapi`; it serves the same lanes but covers recent posts, about the last week, unless your X developer project has full-archive access. `--diagnose` reports whether the key is working (and flags an unpaid key as `payment-required`).
 
