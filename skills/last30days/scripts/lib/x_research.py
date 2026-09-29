@@ -16,6 +16,7 @@ import os
 import re
 import tempfile
 import time
+import urllib.parse as _urlparse
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -415,6 +416,104 @@ _SEED_STOP = frozenset({
 # its own. LAST30DAYS_X_DIG_SEEDS overrides; 0 disables seeding.
 DIG_SEEDS_PER_ROUND = 3
 
+# Hot-thread / linked-URL seeds per round on the X lane ("neighborhood"
+# enumeration — see _x_neighborhood_queries).
+# LAST30DAYS_X_DIG_NEIGHBOR overrides; 0 disables.
+DIG_NEIGHBOR_PER_ROUND = 3
+
+# Links to these hosts are the corpus itself (or self-referential), so a
+# url: reverse query would just re-fetch known items.
+_NEIGHBOR_SKIP_HOSTS = frozenset({
+    "x.com", "twitter.com", "mobile.twitter.com", "t.co",
+    "news.ycombinator.com",
+})
+
+
+def _x_url_target(url: str) -> str | None:
+    """'host' or 'host/path' usable in an X ``url:`` query, else None.
+
+    X ``url:`` matches the *expanded* URL a post links, so a query names
+    the shared page rather than wording in the tweet. Path is kept so
+    links to huge hosts (github.com/owner/repo, arxiv.org/abs/...) stay
+    precise instead of flooding on the whole domain.
+    """
+    try:
+        parsed = _urlparse.urlparse(url.strip())
+    except (ValueError, AttributeError):
+        return None
+    if parsed.scheme not in ("http", "https"):
+        return None
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if not host or host in _NEIGHBOR_SKIP_HOSTS:
+        return None
+    path = parsed.path.strip("/")
+    if not path:
+        return host
+    return f"{host}/{path[:64]}"
+
+
+def _engagement_score(item: dict) -> int:
+    eng = item.get("engagement")
+    if isinstance(eng, dict):
+        return int(eng.get("views") or eng.get("likes") or 0)
+    if isinstance(eng, (int, float)):
+        return int(eng)
+    return 0
+
+
+def _x_neighborhood_queries(
+    items: list[dict],
+    tried_norm: set,
+    *,
+    max_seeds: int,
+) -> list[str]:
+    """Neighborhood-enumeration seeds for the X lane.
+
+    X can't enumerate the platform, but it can enumerate neighborhoods:
+    ``url:<page>`` catches every post linking a found URL regardless of
+    wording, ``conversation_id:<id>`` pulls a hot thread's replies (which
+    name adjacent tools — "we switched from X to this"), and ``@handle``
+    catches the chatter around a recurring account. Each turns one lucky
+    hit into the whole cluster it came from.
+    """
+    if max_seeds <= 0:
+        return []
+    url_hits: Counter[str] = Counter()
+    mentions: Counter[str] = Counter()
+    convos: list[tuple[int, str]] = []
+    for it in items[-400:]:
+        if not isinstance(it, dict):
+            continue
+        target = _x_url_target(str(it.get("url") or it.get("link") or ""))
+        if target:
+            url_hits[target] += 1
+        pid = str(it.get("post_id") or "")
+        if pid.isdigit():
+            convos.append((_engagement_score(it), pid))
+        for handle in it.get("mentioned_handles") or []:
+            handle = str(handle).strip().lstrip("@")
+            if 2 <= len(handle) <= 30:
+                mentions[handle] += 1
+    seeds: list[str] = []
+
+    def _take(query: str) -> bool:
+        if normalize_query(query) in tried_norm or query in seeds:
+            return False
+        seeds.append(query)
+        return True
+
+    url_budget = max(1, (max_seeds * 2) // 3)
+    for target, _ in url_hits.most_common(url_budget):
+        _take(f"url:{target}")
+    convos.sort(key=lambda t: -t[0])
+    for _score, pid in convos[:max(0, max_seeds - len(seeds))]:
+        _take(f"conversation_id:{pid}")
+    for handle, _ in mentions.most_common(max(0, max_seeds - len(seeds))):
+        _take(f"@{handle}")
+    return seeds[:max_seeds]
+
 
 def _seed_queries(
     topic: str,
@@ -576,6 +675,10 @@ def dig_source(
     seeds_per_round = max(
         0, _map_int(env_map, "LAST30DAYS_X_DIG_SEEDS", DIG_SEEDS_PER_ROUND)
     )
+    neighbor_per_round = max(
+        0,
+        _map_int(env_map, "LAST30DAYS_X_DIG_NEIGHBOR", DIG_NEIGHBOR_PER_ROUND),
+    )
     new_items: list[dict] = []
     previous_assessment = None
 
@@ -635,6 +738,14 @@ def dig_source(
             author_prefix="from:" if lane == "x" else None,
         ):
             _run_query(query)
+
+        if lane == "x":
+            for query in _x_neighborhood_queries(
+                interim_items + list(seed_items or []) + new_items,
+                tried_norm,
+                max_seeds=neighbor_per_round,
+            ):
+                _run_query(query)
 
         try:
             decision = planner.plan(

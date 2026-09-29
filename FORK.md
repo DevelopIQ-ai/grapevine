@@ -45,7 +45,11 @@ every round so coverage doesn't depend on planner phrasing. Two enumeration
 lanes skip queries entirely: `hn-enum` pulls every HN story posted in the
 window and `github-enum` every public repo created in it — Jev judges the
 complete corpus rather than a phrasing-dependent sample
-(`LAST30DAYS_X_DIG_ENUMERATE`/`LAST30DAYS_X_DIG_ENUM_MAX` tune it). Every retrieved
+(`LAST30DAYS_X_DIG_ENUMERATE`/`LAST30DAYS_X_DIG_ENUM_MAX` tune it). The X
+lane can't enumerate the platform, so it enumerates neighborhoods instead:
+`url:<page>` catches every post linking a found URL regardless of wording,
+`conversation_id:` pulls hot threads' replies, `@handle` sweeps account
+chatter (`LAST30DAYS_X_DIG_NEIGHBOR`). Every retrieved
 item is relevance-classified by Jev before merging; a second-stage Judge then
 scores survivors and drops thin or spammy ones. A cross-run ledger remembers
 every surfaced id so repeat runs accumulate instead of repeating.

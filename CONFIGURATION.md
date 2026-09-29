@@ -284,7 +284,10 @@ researcher) ride on every GetXAPI call:
   and every public repo created inside the date window so Jev judges the
   complete corpus, not a phrasing-dependent sample. Disable with
   `LAST30DAYS_X_DIG_ENUMERATE=0`; bound per-lane Jev volume with
-  `LAST30DAYS_X_DIG_ENUM_MAX` (default 4000 items/lane). Needs a planner key
+  `LAST30DAYS_X_DIG_ENUM_MAX` (default 4000 items/lane). On the X lane,
+  `LAST30DAYS_X_DIG_NEIGHBOR` (default 3/round) seeds neighborhood
+  enumeration each round — `url:<page>` reverse-search, `conversation_id:`
+  thread pulls, and `@handle` mention sweeps mined from the corpus. Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
   disables. Author name, bio, followers, and location from each post's author

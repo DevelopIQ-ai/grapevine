@@ -96,7 +96,11 @@ proper names, `from:` author seeds on X; `LAST30DAYS_X_DIG_SEEDS` 3).
 Two enumeration lanes (`hn-enum`, `github-enum`) pull the whole date
 window — every HN story posted, every repo created — so Jev judges the
 complete corpus (`LAST30DAYS_X_DIG_ENUMERATE=0` off,
-`LAST30DAYS_X_DIG_ENUM_MAX` cap).
+`LAST30DAYS_X_DIG_ENUM_MAX` cap). The X lane additionally enumerates
+*neighborhoods* each round — `url:<page>` catches every post linking a
+found URL regardless of wording, `conversation_id:<id>` pulls hot
+threads' replies, `@handle` catches chatter around recurring accounts
+(`LAST30DAYS_X_DIG_NEIGHBOR` 3/round, 0 off).
 Results merge under `x-dig`/`hn-dig`/`news-dig`/`reddit-dig`/`web-dig`/
 `github-dig`/`bluesky-dig`/`yt-dig`/`arxiv-dig`/`techmeme-dig`/`*-enum`; deep runs dig 2 rounds
 by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
