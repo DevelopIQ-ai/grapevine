@@ -245,72 +245,84 @@ class Planner:
             "A stop reason must explain why coverage and expected novelty justify completion, including any limitations. Never claim exhaustive coverage merely because several narrow queries were empty. "
             "Never weaken or change the objective or filters."
         )
-        data = _post_retried(
-            self.base_url.rstrip("/") + "/chat/completions",
-            self.key,
-            {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": instructions},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "objective": objective,
-                                "filters": filters,
-                                "feedback": feedback,
-                            }
-                        ),
-                    },
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 2500,
-            },
-            timeout,
-            environ=self._environ,
-        )
-        try:
-            result = json.loads(data["choices"][0]["message"]["content"])
-            action = result["action"]
-            reason = result["reason"]
-            summary = result["coverage_summary"]
-            queries = result["queries"]
-            if action not in ("search", "stop"):
-                raise ValueError()
-            if not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
-                raise ValueError()
-            if not isinstance(summary, str) or len(summary) > 8000:
-                raise ValueError()
-            if not isinstance(queries, list) or (action == "search" and not 1 <= len(queries) <= 3) or (action == "stop" and queries):
-                raise ValueError()
-            if any(
-                not isinstance(q, str)
-                or not q.strip()
-                or len(q) > 500
-                or any(ord(c) < 32 for c in q)
-                for q in queries
-            ):
-                raise ValueError()
-            cleaned = [
-                " ".join(
-                    re.sub(
-                        r"(?i)(?<!\S)-?(?:site|since|until|before|after):(?:\"[^\"]*\"|\S+)",
-                        "",
-                        q,
-                    ).split()
-                )
-                for q in queries
-            ]
-            if any(not q for q in cleaned):
-                raise ValueError()
-            usage = data.get("usage") or {}
-            if not isinstance(usage, dict):
-                usage = {}
-            usage = {k:v for k,v in usage.items() if k in ("prompt_tokens", "completion_tokens", "total_tokens") and type(v) in (int,float) and math.isfinite(v) and v >= 0}
-            return {"action":action, "reason":reason.strip(), "coverage_summary":summary.strip(),
-                    "queries":list(dict.fromkeys(cleaned)), "usage":usage}
-        except (KeyError, IndexError, TypeError, ValueError):
-            raise ProviderError("Planner returned an invalid search/completion decision.") from None
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "objective": objective,
+                            "filters": filters,
+                            "feedback": feedback,
+                        }
+                    ),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": 2500,
+        }
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        # Malformed decisions are stochastic model noise, not deterministic
+        # failures — a fresh sample usually satisfies the contract, so
+        # validation failures retry with the same backoff policy as
+        # transport errors before the lane marks provider_failed.
+        retries = _env_positive_int(self._environ, "DISCOVERY_PROVIDER_RETRIES", 3, 8)
+        base = _env_positive_float(self._environ, "DISCOVERY_PROVIDER_BACKOFF", 2.0, 30.0)
+        for attempt in range(retries + 1):
+            data = _post_retried(url, self.key, body, timeout, environ=self._environ)
+            try:
+                result = json.loads(data["choices"][0]["message"]["content"])
+                action = result["action"]
+                reason = result["reason"]
+                summary = result["coverage_summary"]
+                queries = result["queries"]
+                if action not in ("search", "stop"):
+                    raise ValueError("action must be 'search' or 'stop'")
+                if not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
+                    raise ValueError("reason missing or over 2000 chars")
+                if not isinstance(summary, str) or len(summary) > 8000:
+                    raise ValueError("coverage_summary missing or over 8000 chars")
+                if not isinstance(queries, list) or (action == "search" and not 1 <= len(queries) <= 3) or (action == "stop" and queries):
+                    raise ValueError("queries list violates the action contract")
+                if any(
+                    not isinstance(q, str)
+                    or not q.strip()
+                    or len(q) > 500
+                    or any(ord(c) < 32 for c in q)
+                    for q in queries
+                ):
+                    raise ValueError("a query is empty, overlong, or control-charred")
+                cleaned = [
+                    " ".join(
+                        re.sub(
+                            r"(?i)(?<!\S)-?(?:site|since|until|before|after):(?:\"[^\"]*\"|\S+)",
+                            "",
+                            q,
+                        ).split()
+                    )
+                    for q in queries
+                ]
+                if any(not q for q in cleaned):
+                    raise ValueError("a query stripped to empty")
+                usage = data.get("usage") or {}
+                if not isinstance(usage, dict):
+                    usage = {}
+                usage = {k:v for k,v in usage.items() if k in ("prompt_tokens", "completion_tokens", "total_tokens") and type(v) in (int,float) and math.isfinite(v) and v >= 0}
+                return {"action":action, "reason":reason.strip(), "coverage_summary":summary.strip(),
+                        "queries":list(dict.fromkeys(cleaned)), "usage":usage}
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                if attempt < retries:
+                    delay = base * (2 ** attempt)
+                    delay *= 1.0 + random.random() * 0.5
+                    time.sleep(delay)
+                    continue
+                detail = str(exc) or type(exc).__name__
+                raise ProviderError(
+                    "Planner returned an invalid search/completion decision "
+                    f"({detail})."
+                ) from None
 
 
 class Jev:
@@ -486,43 +498,50 @@ class Judge:
             "array of {\"i\": integer index, \"score\": integer 0-100} covering "
             "every candidate index exactly once."
         )
-        data = _post_retried(
-            self.base_url.rstrip("/") + "/chat/completions",
-            self.key,
-            {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": instructions},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {"objective": objective, "candidates": candidates}
-                        ),
-                    },
-                ],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 2000,
-            },
-            timeout,
-            environ=self._environ,
-        )
-        try:
-            result = json.loads(data["choices"][0]["message"]["content"])
-            verdicts = result["verdicts"]
-            if not isinstance(verdicts, list):
-                raise ValueError()
-            scores = {}
-            for entry in verdicts:
-                i, score = entry["i"], entry["score"]
-                if type(i) is not int or i < 0 or i >= len(candidates):
-                    raise ValueError()
-                if type(score) not in (int, float) or not 0 <= score <= 100:
-                    raise ValueError()
-                scores[i] = int(score)
-            if not scores:
-                raise ValueError()
-            return scores
-        except (KeyError, IndexError, TypeError, ValueError):
-            raise ProviderError(
-                "Judge returned an invalid verdict batch."
-            ) from None
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"objective": objective, "candidates": candidates}
+                    ),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": 2000,
+        }
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        # Same policy as the planner: malformed verdict batches are
+        # stochastic — retry with backoff, then fail hard.
+        retries = _env_positive_int(self._environ, "DISCOVERY_PROVIDER_RETRIES", 3, 8)
+        base = _env_positive_float(self._environ, "DISCOVERY_PROVIDER_BACKOFF", 2.0, 30.0)
+        for attempt in range(retries + 1):
+            data = _post_retried(url, self.key, body, timeout, environ=self._environ)
+            try:
+                result = json.loads(data["choices"][0]["message"]["content"])
+                verdicts = result["verdicts"]
+                if not isinstance(verdicts, list):
+                    raise ValueError("verdicts missing or not a list")
+                scores = {}
+                for entry in verdicts:
+                    i, score = entry["i"], entry["score"]
+                    if type(i) is not int or i < 0 or i >= len(candidates):
+                        raise ValueError("a verdict index is out of range")
+                    if type(score) not in (int, float) or not 0 <= score <= 100:
+                        raise ValueError("a verdict score is not 0-100")
+                    scores[i] = int(score)
+                if not scores:
+                    raise ValueError("verdicts list was empty")
+                return scores
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                if attempt < retries:
+                    delay = base * (2 ** attempt)
+                    delay *= 1.0 + random.random() * 0.5
+                    time.sleep(delay)
+                    continue
+                detail = str(exc) or type(exc).__name__
+                raise ProviderError(
+                    f"Judge returned an invalid verdict batch ({detail})."
+                ) from None

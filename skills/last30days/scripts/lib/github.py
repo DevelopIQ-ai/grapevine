@@ -22,6 +22,7 @@ from .query import extract_core_subject
 from .relevance import token_overlap_relevance
 
 SEARCH_URL = "https://api.github.com/search/issues"
+REPOS_SEARCH_URL = "https://api.github.com/search/repositories"
 
 DEPTH_LIMITS = {
     "quick": 15,
@@ -395,6 +396,67 @@ def search_github(
     if partition_failure:
         envelope["error"] = partition_failure
     return envelope
+
+
+def enumerate_new_repos(
+    from_date: str,
+    to_date: str,
+    *,
+    token: Optional[str] = None,
+    max_items: int = 200,
+) -> Dict[str, Any]:
+    """Enumerate public repos *created* inside the window, most-starred
+    first — a completeness lane: every new repo in the range rather than
+    keyword-filtered hits. Jev judges relevance downstream.
+
+    The anonymous tier caps at ~10 search requests/minute, so unauthed
+    enumeration stays on one page; a token permits the full max_items.
+    Returns canonical item dicts shaped for _normalize_github.
+    """
+    resolved_token = _resolve_token(token)
+    if not resolved_token:
+        max_items = min(max_items, 100)
+    fetch_failures: List[str] = []
+    raw: List[Dict[str, Any]] = []
+    page = 1
+    while len(raw) < max_items:
+        params = {
+            "q": f"created:{from_date}..{to_date} sort:stars-desc",
+            "per_page": str(min(100, max_items)),
+        }
+        if page > 1:
+            params["page"] = str(page)
+        url = f"{REPOS_SEARCH_URL}?{urllib.parse.urlencode(params)}"
+        data = _fetch_json(url, token=resolved_token, timeout=30,
+                           failure_out=fetch_failures)
+        if not data:
+            break
+        batch = data.get("items") or []
+        raw.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    items = [
+        {
+            "id": str(r.get("id") or ""),
+            "title": str(r.get("full_name") or r.get("name") or ""),
+            "snippet": str(r.get("description") or ""),
+            "url": str(r.get("html_url") or ""),
+            "date": str(r.get("created_at") or "")[:10],
+            "author": str((r.get("owner") or {}).get("login") or ""),
+            "engagement": {"stars": r.get("stargazers_count") or 0},
+            "relevance": 0.5,
+            "why_relevant": "repo created in window",
+        }
+        for r in raw[:max_items]
+    ]
+    _log(f"Enumerated {len(items)} repos created {from_date}..{to_date}")
+    result: Dict[str, Any] = {"items": items}
+    if fetch_failures:
+        result["error"] = (
+            "GitHub repo enumeration failed: " + fetch_failures[-1]
+        )
+    return result
 
 
 def parse_github_response(response: Dict[str, Any]) -> List[Dict[str, Any]]:

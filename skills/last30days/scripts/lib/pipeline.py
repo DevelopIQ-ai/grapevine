@@ -4626,6 +4626,57 @@ def _run_multi_source_dig(
         lane_defs.append(("arxiv", "arxiv-dig", _search_arxiv))
     if (lanes is None or "techmeme" in lanes) and "techmeme" in available:
         lane_defs.append(("techmeme", "techmeme-dig", _search_techmeme))
+
+    # Enumeration lanes: completeness instead of queries — the lane's first
+    # query call returns the whole window slice (every HN story posted, every
+    # repo created) and later calls return empty, so Jev judges each item
+    # exactly once. LAST30DAYS_X_DIG_ENUMERATE=0 disables;
+    # LAST30DAYS_X_DIG_ENUM_MAX bounds per-lane Jev volume (default 4000).
+    if str(config.get("LAST30DAYS_X_DIG_ENUMERATE") or "1") != "0":
+        try:
+            enum_max = int(config.get("LAST30DAYS_X_DIG_ENUM_MAX") or 4000)
+        except (TypeError, ValueError):
+            enum_max = 4000
+
+        def _one_shot(fn: Any) -> Any:
+            state = {"done": False}
+
+            def _search(_query: str) -> dict:
+                if state["done"]:
+                    return {"items": []}
+                state["done"] = True
+                try:
+                    return fn()
+                except Exception as exc:
+                    return {"items": [], "error": str(exc)}
+
+            return _search
+
+        def _enum_hn() -> dict:
+            result = hackernews.enumerate_algolia_window(
+                from_date, to_date, max_items=enum_max)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {
+                "items": hackernews.parse_hackernews_response(
+                    result, query="") or [],
+                "error": error,
+            }
+
+        if (
+            (lanes is None or "hackernews_enum" in lanes or "hn_enum" in lanes)
+            and "hackernews" in available
+        ):
+            lane_defs.append(
+                ("hackernews_enum", "hn-enum", _one_shot(_enum_hn)))
+        if (lanes is None or "github_enum" in lanes) and "github" in available:
+            gh_enum_token = github.resolve_token(config.get("GITHUB_TOKEN"))
+            lane_defs.append((
+                "github_enum",
+                "github-enum",
+                _one_shot(lambda: github.enumerate_new_repos(
+                    from_date, to_date, token=gh_enum_token,
+                    max_items=min(enum_max, 200))),
+            ))
     if not lane_defs:
         return
 

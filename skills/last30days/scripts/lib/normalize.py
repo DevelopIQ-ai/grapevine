@@ -74,6 +74,8 @@ def normalize_source_items(
         "googlenews": _normalize_grounding,
         "xiaohongshu": _normalize_grounding,
         "github": _normalize_github,
+        "github_enum": _normalize_github,
+        "hackernews_enum": _normalize_hackernews,
         "perplexity": _normalize_grounding,
         "jobs": _normalize_jobs,
         "linkedin": _normalize_linkedin,

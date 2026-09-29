@@ -333,6 +333,8 @@ _LANE_LABELS = {
     "x": "X/Twitter posts",
     "hackernews": "Hacker News stories",
     "grounding": "web pages",
+    "hackernews_enum": "Hacker News stories",
+    "github_enum": "GitHub repositories",
 }
 
 _LANE_CONTEXT_NOTES = {
@@ -353,6 +355,17 @@ _LANE_CONTEXT_NOTES = {
         "category words — over long keyword strings. Good pivots: bare "
         "product or company names, alternate phrasings, official domains, "
         "launch/announcement phrasings."
+    ),
+    "hackernews_enum": (
+        "Enumeration lane: the first query returns every Hacker News "
+        "story posted inside the date window — completeness, not "
+        "per-query retrieval. Emit a single broad query and expect the "
+        "full corpus; further queries on this lane surface nothing new."
+    ),
+    "github_enum": (
+        "Enumeration lane: the first query returns every public GitHub "
+        "repository created inside the date window, most-starred first. "
+        "Emit a single broad query; further queries surface nothing new."
     ),
 }
 

@@ -93,8 +93,12 @@ YouTube/arXiv/Techmeme when their binaries (`yt-dlp`, `arxiv-pp-cli`,
 `techmeme-pp-cli`) are on PATH — plus seed queries mined across lanes
 (recurring names, topic
 proper names, `from:` author seeds on X; `LAST30DAYS_X_DIG_SEEDS` 3).
+Two enumeration lanes (`hn-enum`, `github-enum`) pull the whole date
+window — every HN story posted, every repo created — so Jev judges the
+complete corpus (`LAST30DAYS_X_DIG_ENUMERATE=0` off,
+`LAST30DAYS_X_DIG_ENUM_MAX` cap).
 Results merge under `x-dig`/`hn-dig`/`news-dig`/`reddit-dig`/`web-dig`/
-`github-dig`/`bluesky-dig`/`yt-dig`/`arxiv-dig`/`techmeme-dig`; deep runs dig 2 rounds
+`github-dig`/`bluesky-dig`/`yt-dig`/`arxiv-dig`/`techmeme-dig`/`*-enum`; deep runs dig 2 rounds
 by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
 `LAST30DAYS_X_DIG_SOURCES` narrows lanes and
 `LAST30DAYS_X_DIG_QUERIES` retunes follow-ups. Every item is Jev-classified

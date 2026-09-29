@@ -711,6 +711,11 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         ('LAST30DAYS_X_DIG_JUDGE', None),
         ('LAST30DAYS_X_DIG_SOURCES', None),
         ('LAST30DAYS_X_DIG_SEEDS', None),
+        # Enumeration lanes (hn-enum/github-enum): pull the whole window
+        # once, Jev judges every item. 0 disables; the max bounds per-lane
+        # Jev classify volume.
+        ('LAST30DAYS_X_DIG_ENUMERATE', None),
+        ('LAST30DAYS_X_DIG_ENUM_MAX', None),
         ('LAST30DAYS_MAX_X_CALLS', None),
         ('LAST30DAYS_X_LEDGER', None),
         ('LAST30DAYS_X_LEDGER_MAX_QUERIES', None),

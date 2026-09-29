@@ -42,7 +42,8 @@ ALL_SOURCES = [
 ]
 
 
-def _capture_lanes(monkeypatch, available, dig_sources=None):
+def _capture_lanes(monkeypatch, available, dig_sources=None,
+                   enumerate_flag=None):
     """Run _run_multi_source_dig with dig_source stubbed; return {src: fn}."""
     captured: dict[str, object] = {}
 
@@ -55,6 +56,8 @@ def _capture_lanes(monkeypatch, available, dig_sources=None):
     config = {"_x_dig_rounds": 1}
     if dig_sources is not None:
         config["LAST30DAYS_X_DIG_SOURCES"] = dig_sources
+    if enumerate_flag is not None:
+        config["LAST30DAYS_X_DIG_ENUMERATE"] = enumerate_flag
     pipeline._run_multi_source_dig(
         topic="test topic",
         bundle=schema.RetrievalBundle(),
@@ -71,16 +74,51 @@ def _capture_lanes(monkeypatch, available, dig_sources=None):
 
 def test_all_diggable_sources_get_lanes(monkeypatch):
     lanes = _capture_lanes(monkeypatch, ALL_SOURCES)
-    # Keyless lanes are always present; keyed/binary lanes join via available.
+    # Keyless lanes are always present; keyed/binary lanes join via
+    # available; enumeration lanes follow their base source's availability.
     assert set(lanes) == {
         "hackernews", "grounding", "googlenews", "reddit",
         "github", "bluesky", "youtube", "arxiv", "techmeme",
+        "hackernews_enum", "github_enum",
     }
+
+
+def test_enum_lanes_disabled_by_flag(monkeypatch):
+    lanes = _capture_lanes(monkeypatch, ALL_SOURCES, enumerate_flag="0")
+    assert "hackernews_enum" not in lanes
+    assert "github_enum" not in lanes
+
+
+def test_enum_lanes_filter_to_base_source(monkeypatch):
+    lanes = _capture_lanes(
+        monkeypatch, ALL_SOURCES, dig_sources="hackernews_enum")
+    assert set(lanes) == {"hackernews_enum"}
+
+
+def test_enum_lane_enumerates_once(monkeypatch):
+    lanes = _capture_lanes(
+        monkeypatch, ["hackernews"], dig_sources="hackernews_enum")
+    assert "hackernews_enum" in lanes
+    fn = lanes["hackernews_enum"]
+    fake = {"hits": [{"objectID": "1", "title": "Show HN: x"}]}
+    parsed = [{"id": "1", "title": "Show HN: x", "url": "u"}]
+    with patch.object(
+        pipeline.hackernews, "enumerate_algolia_window", return_value=fake
+    ) as mock_enum, patch.object(
+        pipeline.hackernews, "parse_hackernews_response", return_value=parsed
+    ):
+        first = fn("anything")
+        second = fn("anything else")
+    mock_enum.assert_called_once()
+    assert first["items"] == parsed
+    assert second == {"items": []}
 
 
 def test_gated_lanes_skip_when_unavailable(monkeypatch):
     lanes = _capture_lanes(monkeypatch, ["hackernews"])
-    assert set(lanes) == {"hackernews", "googlenews", "reddit"}
+    assert set(lanes) == {
+        "hackernews", "googlenews", "reddit", "hackernews_enum",
+    }
 
 
 def test_lane_filter_restricts_sources(monkeypatch):

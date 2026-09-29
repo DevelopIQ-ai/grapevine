@@ -279,7 +279,12 @@ researcher) ride on every GetXAPI call:
   (anon tier; `GITHUB_TOKEN` only raises rate limits); Bluesky joins when
   `BSKY_HANDLE`/`BSKY_APP_PASSWORD` are configured, and YouTube/arXiv/
   Techmeme join when their binaries (`yt-dlp`, `arxiv-pp-cli`,
-  `techmeme-pp-cli`) are on PATH. Needs a planner key
+  `techmeme-pp-cli`) are on PATH. Two enumeration lanes (`hn-enum`,
+  `github-enum`) skip queries entirely — they pull every HN story posted
+  and every public repo created inside the date window so Jev judges the
+  complete corpus, not a phrasing-dependent sample. Disable with
+  `LAST30DAYS_X_DIG_ENUMERATE=0`; bound per-lane Jev volume with
+  `LAST30DAYS_X_DIG_ENUM_MAX` (default 4000 items/lane). Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
   disables. Author name, bio, followers, and location from each post's author
