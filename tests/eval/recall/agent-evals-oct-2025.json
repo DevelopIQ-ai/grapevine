@@ -1,0 +1,44 @@
+{
+ "name": "agent-evals-oct-2025",
+ "topic": "AI agent benchmarks and evaluation tools released last week",
+ "from_date": "2025-10-01",
+ "to_date": "2025-10-08",
+ "args": ["--deep", "--x-dig", "3", "--as-of", "2025-10-08"],
+ "intent": "news",
+ "freshness_mode": "strict_recent",
+ "cluster_mode": "none",
+ "subqueries": [
+  {
+   "label": "agent-benchmarks",
+   "search_query": "agent benchmark OR evaluation OR eval release",
+   "ranking_query": "new benchmarks, evaluations, or testing frameworks for AI agents",
+   "sources": ["x", "web", "hackernews"],
+   "weight": 1.0
+  },
+  {
+   "label": "eval-tools",
+   "search_query": "\"agent\" test OR eval OR benchmark tool launched",
+   "ranking_query": "launches of tools for evaluating or benchmarking AI agents",
+   "sources": ["x", "web", "hackernews"],
+   "weight": 0.9
+  },
+  {
+   "label": "named-evals",
+   "search_query": "Terminal-Bench OR SWE-bench OR SigmaEval OR CodeLens OR \"agent evals\"",
+   "ranking_query": "news about named AI agent benchmarks or eval platforms",
+   "sources": ["x", "web", "hackernews"],
+   "weight": 0.8
+  }
+ ],
+ "expected": [
+  {"label": "Terminal-Bench 2.0 article", "match": "terminal-bench 2.0"},
+  {"label": "FLE v0.3 Claude Code Plays Factorio", "match": "fle v0.3"},
+  {"label": "SAI reinforcement learning competition", "match": "reinforcement learning competition"},
+  {"label": "CodeLens.AI community benchmark", "match": "codelens"},
+  {"label": "SigmaEval", "match": "sigmaeval"},
+  {"label": "GitHub CI + Evals for AI Agents", "match": "ci and evals for ai agents"},
+  {"label": "OSS agent testing framework (semantic validation)", "match": "semantic validation"},
+  {"label": "Google computer-use model eval", "match": "computer use model"},
+  {"label": "LLM Evaluation from Scratch", "match": "llm evaluation from scratch"}
+ ]
+}

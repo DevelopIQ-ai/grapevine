@@ -4524,11 +4524,23 @@ def _run_multi_source_dig(
         error = artifact.get("error") if isinstance(artifact, dict) else None
         return {"items": items or [], "error": error}
 
+    def _search_news(query: str) -> dict:
+        try:
+            items, artifact = grounding.web_search(
+                query, date_range, config, backend="googlenews")
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+        error = artifact.get("error") if isinstance(artifact, dict) else None
+        return {"items": items or [], "error": error}
+
     lane_defs: list[tuple[str, str, Any]] = []
     if (lanes is None or "hackernews" in lanes) and "hackernews" in available:
         lane_defs.append(("hackernews", "hn-dig", _search_hn))
     if (lanes is None or "grounding" in lanes) and "grounding" in available:
         lane_defs.append(("grounding", "web-dig", _search_web))
+    # Google News is keyless — the lane is always diggable, no "available" gate.
+    if lanes is None or "googlenews" in lanes or "news" in lanes:
+        lane_defs.append(("googlenews", "news-dig", _search_news))
     if not lane_defs:
         return
 

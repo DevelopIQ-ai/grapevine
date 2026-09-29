@@ -46,6 +46,47 @@ class BraveSearchTests(unittest.TestCase):
             self.assertIn("freshness=2026-02-25to2026-03-27", call_url)
 
 
+class GoogleNewsSearchTests(unittest.TestCase):
+    RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<item><title>Comet goes free - TechCrunch</title>
+<link>https://news.google.com/rss/articles/abc1</link>
+<pubDate>Mon, 28 Sep 2026 10:00:00 GMT</pubDate>
+<source url="https://techcrunch.com">TechCrunch</source></item>
+<item><title>Old news - Example</title>
+<link>https://news.google.com/rss/articles/abc2</link>
+<pubDate>Mon, 01 Jun 2025 10:00:00 GMT</pubDate>
+<source url="https://example.com">Example</source></item>
+</channel></rss>"""
+
+    def test_googlenews_filters_to_in_range_dated_items(self):
+        with patch("lib.grounding.http.get_text", return_value=self.RSS):
+            items, artifact = grounding.googlenews_search(
+                "AI browser", ("2026-09-01", "2026-09-29"))
+            self.assertEqual(1, len(items))
+            self.assertEqual("Comet goes free - TechCrunch", items[0]["title"])
+            self.assertEqual("2026-09-28", items[0]["date"])
+            self.assertEqual("TechCrunch", items[0]["source_domain"])
+            self.assertEqual("googlenews", artifact["label"])
+
+    def test_googlenews_handles_fetch_failure_and_bad_xml(self):
+        with patch("lib.grounding.http.get_text", return_value=None):
+            items, _ = grounding.googlenews_search(
+                "q", ("2026-09-01", "2026-09-29"))
+            self.assertEqual([], items)
+        with patch("lib.grounding.http.get_text", return_value="<not xml"):
+            items, _ = grounding.googlenews_search(
+                "q", ("2026-09-01", "2026-09-29"))
+            self.assertEqual([], items)
+
+    def test_explicit_googlenews_backend_invokes_search(self):
+        with patch("lib.grounding.http.get_text", return_value=self.RSS):
+            items, artifact = grounding.web_search(
+                "AI browser", ("2026-09-01", "2026-09-29"), {},
+                backend="googlenews")
+            self.assertEqual(1, len(items))
+
+
 class SerperSearchTests(unittest.TestCase):
     def test_serper_search_filters_to_in_range_dated_items(self):
         mock_response = {

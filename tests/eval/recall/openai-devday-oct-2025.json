@@ -1,0 +1,35 @@
+{
+ "name": "openai-devday-oct-2025",
+ "topic": "OpenAI DevDay announcements last week",
+ "from_date": "2025-10-05",
+ "to_date": "2025-10-08",
+ "args": ["--deep", "--x-dig", "3", "--as-of", "2025-10-08"],
+ "intent": "news",
+ "freshness_mode": "strict_recent",
+ "cluster_mode": "none",
+ "subqueries": [
+  {
+   "label": "devday-announcements",
+   "search_query": "OpenAI DevDay announcement OR announced OR launches",
+   "ranking_query": "product announcements from OpenAI DevDay",
+   "sources": ["x", "web", "hackernews"],
+   "weight": 1.0
+  },
+  {
+   "label": "devday-products",
+   "search_query": "AgentKit OR \"Apps SDK\" OR \"Sora 2 API\" OR \"agent builder\"",
+   "ranking_query": "named products announced at OpenAI DevDay (AgentKit, Apps SDK, Sora 2 API, agent builder)",
+   "sources": ["x", "web", "hackernews"],
+   "weight": 0.9
+  }
+ ],
+ "expected": [
+  {"label": "AgentKit", "match": "agentkit"},
+  {"label": "ChatGPT Apps SDK", "match": "apps sdk"},
+  {"label": "Sora 2 in API", "match": "sora 2"},
+  {"label": "Visual agent builder", "match": "agent builder"},
+  {"label": "DevDay keynote", "match": "devday"},
+  {"label": "ChatGPT as app front end", "match": "chatgpt"},
+  {"label": "Jony Ive devices", "match": "jony ive"}
+ ]
+}

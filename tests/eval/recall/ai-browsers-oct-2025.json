@@ -1,0 +1,34 @@
+{
+ "name": "ai-browsers-oct-2025",
+ "topic": "AI browser launches and news last week",
+ "from_date": "2025-10-01",
+ "to_date": "2025-10-08",
+ "args": ["--deep", "--x-dig", "3", "--as-of", "2025-10-08"],
+ "intent": "news",
+ "freshness_mode": "strict_recent",
+ "cluster_mode": "none",
+ "subqueries": [
+  {
+   "label": "ai-browser-launches",
+   "search_query": "AI browser launch OR launching OR released",
+   "ranking_query": "launches, pricing changes, and news about AI browsers",
+   "sources": ["x", "web", "hackernews"],
+   "weight": 1.0
+  },
+  {
+   "label": "named-browsers",
+   "search_query": "Comet OR Perplexity OR Opera Neon OR Dia browser",
+   "ranking_query": "news about named AI browsers (Comet, Opera Neon, Dia)",
+   "sources": ["x", "web", "hackernews"],
+   "weight": 0.9
+  }
+ ],
+ "expected": [
+  {"label": "Comet goes free ($200 browser)", "match": "ai browser free"},
+  {"label": "CometJacking one-click attack", "match": "cometjacking"},
+  {"label": "Perplexity bets on free AI browser", "match": "bets on free ai browser"},
+  {"label": "Opera $19.90 AI browser", "match": "19.90"},
+  {"label": "Chimera Browser LLM rewrites", "match": "chimera browser"},
+  {"label": "Comet (Perplexity AI Browser) post", "match": "comet"}
+ ]
+}
