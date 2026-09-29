@@ -704,6 +704,8 @@ def dig(
 # Jev reject/evidence bands, mirroring discovery.py's defaults.
 JEV_REJECT = 0.2
 JEV_EVIDENCE = 0.8
+# Candidate text sent to Jev per classify call — the dominant input-token cost.
+JEV_TEXT_CHARS = 800
 
 
 def _classify_round(items, jev, objective, stats, warnings, timeout):
@@ -729,9 +731,7 @@ def _classify_round(items, jev, objective, stats, warnings, timeout):
         )
         try:
             judgement = jev.classify(objective, [objective], {
-                "text": text[:2000],
-                "author": str(item.get("author_handle") or item.get("author") or ""),
-                "url": str(item.get("url") or item.get("hn_url") or ""),
+                "text": text[:JEV_TEXT_CHARS],
             }, timeout)
         except discovery_providers.ProviderError as exc:
             stats["provider_failed"] = True
