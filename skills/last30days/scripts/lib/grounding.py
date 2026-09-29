@@ -5,8 +5,10 @@ from __future__ import annotations
 import re
 import sys
 import urllib.parse
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
 from . import dates, env, http, parallel_mcp, schema, web_search_keyless
@@ -251,6 +253,64 @@ def tinyfish_search(
     return items, artifact
 
 
+# ---------------------------------------------------------------------------
+# Google News RSS (keyless — no API key, free)
+# ---------------------------------------------------------------------------
+
+def googlenews_search(
+    query: str, date_range: tuple[str, str], count: int = 25,
+) -> tuple[list[dict], dict]:
+    url = (
+        "https://news.google.com/rss/search?"
+        + urllib.parse.urlencode(
+            {
+                "q": query,
+                "hl": "en-US",
+                "gl": "US",
+                "ceid": "US:en",
+            }
+        )
+    )
+    text = http.get_text(url, accept="application/rss+xml")
+    root = None
+    if text:
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            root = None
+    items = []
+    if root is not None:
+        for i, node in enumerate(root.findall(".//item")):
+            link = (node.findtext("link") or "").strip()
+            if not link:
+                continue
+            pub_date = _rfc822_date(node.findtext("pubDate") or "")
+            if not _in_date_range(pub_date, date_range):
+                continue
+            publisher = (node.findtext("source") or "").strip()
+            items.append({
+                "id": f"GN{i + 1}",
+                "title": (node.findtext("title") or "").strip(),
+                "url": link,
+                "source_domain": publisher or _domain(link),
+                "snippet": "",
+                "date": pub_date,
+                "relevance": 0.8,
+                "why_relevant": "Google News",
+            })
+    items = items[:count]
+    artifact = {"label": "googlenews", "webSearchQueries": [query],
+                "resultCount": len(items)}
+    return items, artifact
+
+
+def _rfc822_date(raw: str) -> str | None:
+    try:
+        return parsedate_to_datetime(raw.strip()).date().isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
 _TINYFISH_REL_RE = re.compile(
     r"^(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago$", re.IGNORECASE
 )
@@ -351,6 +411,8 @@ def web_search(
         items, artifact = parallel_mcp.search(
             query, date_range, config.get("PARALLEL_API_KEY")
         )
+    elif backend == "googlenews":
+        items, artifact = googlenews_search(query, date_range)
     elif backend == "tinyfish":
         key = config.get("TINYFISH_API_KEY")
         if not key:

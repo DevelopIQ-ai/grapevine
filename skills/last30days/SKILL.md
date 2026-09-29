@@ -86,10 +86,11 @@ run surfaces a breakout post, handle, or subtheme, prefer a second engine pass
 with chase subqueries over widening the first plan — iteration beats breadth.
 For "dig deep / find everything" asks, pass `--x-dig` (or `--x-dig N`):
 each round a planner reviews interim hits and fires follow-ups on X
-(`from:`/`@` lanes), Hacker News (keyless Algolia), and the web
+(`from:`/`@` lanes), Hacker News (keyless Algolia), Google News
+(keyless RSS), and the web
 backend, plus seed queries mined across lanes (recurring names, topic
 proper names, `from:` author seeds on X; `LAST30DAYS_X_DIG_SEEDS` 3).
-Results merge under `x-dig`/`hn-dig`/`web-dig`; deep runs dig 2 rounds
+Results merge under `x-dig`/`hn-dig`/`news-dig`/`web-dig`; deep runs dig 2 rounds
 by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
 `LAST30DAYS_X_DIG_SOURCES` narrows lanes and
 `LAST30DAYS_X_DIG_QUERIES` retunes follow-ups. Every item is Jev-classified
