@@ -58,6 +58,7 @@ from . import (
     reddit,
     reddit_listing,
     reddit_public,
+    reddit_rss,
     relevance,
     rerank,
     schema,
@@ -4533,6 +4534,20 @@ def _run_multi_source_dig(
         error = artifact.get("error") if isinstance(artifact, dict) else None
         return {"items": items or [], "error": error}
 
+    def _search_reddit(query: str) -> dict:
+        try:
+            posts = reddit_rss.search_rss(
+                query,
+                depth=depth if depth in ("quick", "default", "deep")
+                else "default",
+            )
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+        for post in posts or []:
+            if isinstance(post, dict) and "text" not in post:
+                post["text"] = post.get("selftext") or ""
+        return {"items": posts or []}
+
     lane_defs: list[tuple[str, str, Any]] = []
     if (lanes is None or "hackernews" in lanes) and "hackernews" in available:
         lane_defs.append(("hackernews", "hn-dig", _search_hn))
@@ -4541,6 +4556,9 @@ def _run_multi_source_dig(
     # Google News is keyless — the lane is always diggable, no "available" gate.
     if lanes is None or "googlenews" in lanes or "news" in lanes:
         lane_defs.append(("googlenews", "news-dig", _search_news))
+    # Reddit RSS is keyless too — always diggable.
+    if lanes is None or "reddit" in lanes:
+        lane_defs.append(("reddit", "reddit-dig", _search_reddit))
     if not lane_defs:
         return
 

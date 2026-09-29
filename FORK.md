@@ -35,7 +35,8 @@ For "dig deep / find everything" asks the engine adds `--x-dig N` (2 rounds on
 `--deep`, `--effort ultra` maxes it). After initial retrieval a planner reviews
 the interim corpus and fires follow-up queries on each diggable lane — X via
 GetXAPI (`from:`/`@` chases, broad entity queries), Hacker News via the keyless
-Algolia index, Google News via the keyless RSS search, and the web via the
+Algolia index, Google News via the keyless RSS search, Reddit via its keyless
+search RSS, and the web via the
 configured grounding backend. Deterministic
 seed queries mined from the corpus (recurring names, `from:` author seeds) run
 every round so coverage doesn't depend on planner phrasing. Every retrieved
