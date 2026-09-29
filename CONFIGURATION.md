@@ -274,8 +274,6 @@ researcher) ride on every GetXAPI call:
   `news-dig`, `reddit-dig`, `web-dig`, `github-dig`, `bluesky-dig`, `yt-dig`,
   `arxiv-dig`, and `techmeme-dig` subquery labels; X follow-ups honor the
   gate, and all lanes
-||||||| parent of e4753c5 (feat(dig): keyless Reddit lane — search RSS digs community threads free)
-  `news-dig`, and `web-dig` subquery labels; X follow-ups honor the gate, and all lanes
   share the ledger (namespaced per lane) so `previously_seen` memory applies
   to HN, news, Reddit, and web items too. The GitHub lane works keyless
   (anon tier; `GITHUB_TOKEN` only raises rate limits); Bluesky joins when
@@ -290,8 +288,6 @@ researcher) ride on every GetXAPI call:
   `LAST30DAYS_X_DIG_NEIGHBOR` (default 3/round) seeds neighborhood
   enumeration each round — `url:<page>` reverse-search, `conversation_id:`
   thread pulls, and `@handle` mention sweeps mined from the corpus. Needs a planner key
-||||||| parent of e4753c5 (feat(dig): keyless Reddit lane — search RSS digs community threads free)
-  to HN and web items too. Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
   disables. Author name, bio, followers, and location from each post's author
