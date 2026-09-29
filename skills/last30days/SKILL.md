@@ -87,10 +87,14 @@ with chase subqueries over widening the first plan — iteration beats breadth.
 For "dig deep / find everything" asks, pass `--x-dig` (or `--x-dig N`):
 each round a planner reviews interim hits and fires follow-ups on X
 (`from:`/`@` lanes), Hacker News (keyless Algolia), Google News
-(keyless RSS), Reddit (keyless RSS), and the web
-backend, plus seed queries mined across lanes (recurring names, topic
+(keyless RSS), Reddit (keyless RSS), GitHub (keyless anon tier), and the web
+backend — plus Bluesky when `BSKY_*` creds are set and
+YouTube/arXiv/Techmeme when their binaries (`yt-dlp`, `arxiv-pp-cli`,
+`techmeme-pp-cli`) are on PATH — plus seed queries mined across lanes
+(recurring names, topic
 proper names, `from:` author seeds on X; `LAST30DAYS_X_DIG_SEEDS` 3).
-Results merge under `x-dig`/`hn-dig`/`news-dig`/`reddit-dig`/`web-dig`; deep runs dig 2 rounds
+Results merge under `x-dig`/`hn-dig`/`news-dig`/`reddit-dig`/`web-dig`/
+`github-dig`/`bluesky-dig`/`yt-dig`/`arxiv-dig`/`techmeme-dig`; deep runs dig 2 rounds
 by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
 `LAST30DAYS_X_DIG_SOURCES` narrows lanes and
 `LAST30DAYS_X_DIG_QUERIES` retunes follow-ups. Every item is Jev-classified

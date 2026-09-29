@@ -4548,6 +4548,58 @@ def _run_multi_source_dig(
                 post["text"] = post.get("selftext") or ""
         return {"items": posts or []}
 
+    def _search_github(query: str, token: Any = None) -> dict:
+        try:
+            response = github.search_github(
+                query, from_date, to_date, depth=depth, token=token)
+            error = response.get("error") if isinstance(response, dict) else None
+            return {"items": github.parse_github_response(response) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_bluesky(query: str) -> dict:
+        try:
+            result = bluesky.search_bluesky(
+                query, from_date, to_date, depth=depth, config=config)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": bluesky.parse_bluesky_response(result) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_youtube(query: str) -> dict:
+        try:
+            result = youtube_yt.search_youtube(
+                query, from_date, to_date, depth=depth)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": youtube_yt.parse_youtube_response(result) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_arxiv(query: str) -> dict:
+        try:
+            result = arxiv.search_arxiv(
+                query, from_date, to_date, depth=depth)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": arxiv.parse_arxiv_response(
+                        result, query=ranking_query or topic) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
+    def _search_techmeme(query: str) -> dict:
+        try:
+            result = techmeme.search_techmeme(
+                query, from_date, to_date, depth=depth)
+            error = result.get("error") if isinstance(result, dict) else None
+            return {"items": techmeme.parse_techmeme_response(
+                        result, query=ranking_query or topic) or [],
+                    "error": error}
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+
     lane_defs: list[tuple[str, str, Any]] = []
     if (lanes is None or "hackernews" in lanes) and "hackernews" in available:
         lane_defs.append(("hackernews", "hn-dig", _search_hn))
@@ -4559,6 +4611,21 @@ def _run_multi_source_dig(
     # Reddit RSS is keyless too — always diggable.
     if lanes is None or "reddit" in lanes:
         lane_defs.append(("reddit", "reddit-dig", _search_reddit))
+    # GitHub works keyless (anon tier); a token only raises rate limits.
+    if (lanes is None or "github" in lanes) and "github" in available:
+        gh_token = github.resolve_token(config.get("GITHUB_TOKEN"))
+        lane_defs.append(("github", "github-dig",
+                          lambda q: _search_github(q, gh_token)))
+    # Bluesky is gated on BSKY creds via "bluesky" in available.
+    if (lanes is None or "bluesky" in lanes) and "bluesky" in available:
+        lane_defs.append(("bluesky", "bluesky-dig", _search_bluesky))
+    # YouTube/arXiv/Techmeme are gated on their binaries via available.
+    if (lanes is None or "youtube" in lanes) and "youtube" in available:
+        lane_defs.append(("youtube", "yt-dig", _search_youtube))
+    if (lanes is None or "arxiv" in lanes) and "arxiv" in available:
+        lane_defs.append(("arxiv", "arxiv-dig", _search_arxiv))
+    if (lanes is None or "techmeme" in lanes) and "techmeme" in available:
+        lane_defs.append(("techmeme", "techmeme-dig", _search_techmeme))
     if not lane_defs:
         return
 

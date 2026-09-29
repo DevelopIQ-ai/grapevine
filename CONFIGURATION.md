@@ -271,9 +271,15 @@ researcher) ride on every GetXAPI call:
   exempt from the downstream lexical relevance floor, the entity-miss prune,
   and the fused-pool cap — a post the classifier passed is never silently
   re-dropped by a weaker filter. Follow-ups merge under `x-dig`, `hn-dig`,
-  `news-dig`, `reddit-dig`, and `web-dig` subquery labels; X follow-ups honor the gate, and all lanes
+  `news-dig`, `reddit-dig`, `web-dig`, `github-dig`, `bluesky-dig`, `yt-dig`,
+  `arxiv-dig`, and `techmeme-dig` subquery labels; X follow-ups honor the
+  gate, and all lanes
   share the ledger (namespaced per lane) so `previously_seen` memory applies
-  to HN, news, Reddit, and web items too. Needs a planner key
+  to HN, news, Reddit, and web items too. The GitHub lane works keyless
+  (anon tier; `GITHUB_TOKEN` only raises rate limits); Bluesky joins when
+  `BSKY_HANDLE`/`BSKY_APP_PASSWORD` are configured, and YouTube/arXiv/
+  Techmeme join when their binaries (`yt-dlp`, `arxiv-pp-cli`,
+  `techmeme-pp-cli`) are on PATH. Needs a planner key
   (`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`); `--deep` runs default to 2
   rounds, other depths need the flag or `LAST30DAYS_X_DIG_ROUNDS`. `--x-dig 0`
   disables. Author name, bio, followers, and location from each post's author

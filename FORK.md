@@ -36,8 +36,10 @@ For "dig deep / find everything" asks the engine adds `--x-dig N` (2 rounds on
 the interim corpus and fires follow-up queries on each diggable lane — X via
 GetXAPI (`from:`/`@` chases, broad entity queries), Hacker News via the keyless
 Algolia index, Google News via the keyless RSS search, Reddit via its keyless
-search RSS, and the web via the
-configured grounding backend. Deterministic
+search RSS, GitHub via its keyless anon search tier, and the web via the
+configured grounding backend. Bluesky joins when `BSKY_*` creds are set, and
+YouTube/arXiv/Techmeme join when their binaries (`yt-dlp`, `arxiv-pp-cli`,
+`techmeme-pp-cli`) are on PATH. Deterministic
 seed queries mined from the corpus (recurring names, `from:` author seeds) run
 every round so coverage doesn't depend on planner phrasing. Every retrieved
 item is relevance-classified by Jev before merging; a second-stage Judge then
