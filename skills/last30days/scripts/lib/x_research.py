@@ -28,11 +28,12 @@ from . import entity_extract, env
 # Daily capacity gate (getx-daily-usage-gate.ts port)
 # ---------------------------------------------------------------------------
 
-# Ceiling on GetXAPI HTTP calls per UTC day. High enough that normal runs never
-# reach it; it exists so a runaway loop or a hot recurring job cannot burn
-# through the plan. LAST30DAYS_GETXAPI_DAILY_BUDGET overrides; "0" disables the
-# budget (the 429/5xx retry latch below still applies).
-DEFAULT_DAILY_BUDGET = 800
+# Ceiling on GetXAPI HTTP calls per UTC day. A heavy multi-lane dig run can
+# spend several hundred calls on its own; the ceiling exists so a runaway
+# loop or a hot recurring job cannot burn through the plan.
+# LAST30DAYS_GETXAPI_DAILY_BUDGET overrides; "0" disables the budget (the
+# 429/5xx retry latch below still applies).
+DEFAULT_DAILY_BUDGET = 4000
 # How long a 429/5xx pins the provider as exhausted. Mirrors pixie's
 # GETX_AUTHORITY_RETRY_SECONDS latch.
 RETRY_LATCH_SECONDS = 300
