@@ -205,6 +205,12 @@ def _resolve_depth_settings(depth: str, config: dict[str, Any]) -> dict[str, int
     cap (`--max-source-fetches`) is applied separately at the fetch site.
     """
     settings = dict(DEPTH_SETTINGS[depth])
+    # Ultra effort (config marker set by --effort ultra): widest candidate pool
+    # the engine supports. Explicit --max-* caps still override below.
+    if config.get("_ultra"):
+        settings["per_stream_limit"] = 30
+        settings["pool_limit"] = 120
+        settings["rerank_limit"] = 120
     # `is not None` (not truthiness) so an explicit 0 is honored as a real lower
     # bound rather than ignored as "unset" — matches how main() stashes these.
     max_per_source = config.get("_max_per_source")
@@ -381,6 +387,7 @@ def available_sources(
     # engine leaves general web to the model's own search.
     if (config.get("BRAVE_API_KEY") or config.get("EXA_API_KEY")
             or config.get("SERPER_API_KEY") or config.get("PARALLEL_API_KEY")
+            or config.get("TINYFISH_API_KEY")
             or env.keyless_web_allowed(config)):
         available.append("grounding")
     if requested_sources and "jobs" in requested_sources:
@@ -2715,6 +2722,21 @@ def run(
         run_started=run_started,
     )
 
+    # Phase 2c: LLM-steered broad dig over the non-X lanes (HN Algolia + web).
+    # Same planner + Jev loop as the X dig: broad retrieval, per-item
+    # relevance classification, previously-seen memory via the shared ledger.
+    _run_multi_source_dig(
+        topic=topic,
+        bundle=bundle,
+        plan=plan,
+        config=config,
+        depth=depth,
+        date_range=(from_date, to_date),
+        web_backend=web_backend,
+        available=available,
+        mock=mock,
+    )
+
     # Reclassify partial failures as DEGRADED instead of silently dropping them.
     # A source that 429'd on one subquery but succeeded on another is not a hard
     # failure, but it is not healthy either: it likely returned fewer results
@@ -4141,7 +4163,8 @@ def _run_supplemental_searches(
         dig_rounds = int(config.get("_x_dig_rounds") or 0)
     except (TypeError, ValueError):
         dig_rounds = 0
-    if primary == "getxapi" and dig_rounds > 0:
+    lanes = _dig_lanes(config)
+    if primary == "getxapi" and dig_rounds > 0 and (lanes is None or "x" in lanes):
         getx_token = config.get("GETXAPI_KEY", "")
         if getx_token:
             try:
@@ -4159,6 +4182,17 @@ def _run_supplemental_searches(
                 tried = [
                     sq.search_query for sq in plan.subqueries if sq.search_query
                 ]
+                # Cross-lane seed corpus: every retrieved item from every
+                # source — an entity surfacing on HN/web seeds X queries.
+                seed_corpus = [
+                    {
+                        "title": it.title or "",
+                        "text": it.body or it.snippet or "",
+                        "author_handle": it.author or "",
+                    }
+                    for items in bundle.items_by_source.values()
+                    for it in items
+                ]
                 dig_items, dig_warnings, dig_stats = x_research.dig(
                     ranking_query or topic,
                     interim,
@@ -4168,6 +4202,7 @@ def _run_supplemental_searches(
                     depth=depth,
                     token=getx_token,
                     rounds=dig_rounds,
+                    seed_items=seed_corpus,
                 )
                 for warn in dig_warnings:
                     print(f"[X dig] {warn}", file=sys.stderr)
@@ -4176,6 +4211,11 @@ def _run_supplemental_searches(
                         "rounds": dig_stats.get("rounds_run", 0),
                         "queries": dig_stats.get("queries_run", 0),
                         "new_items": dig_stats.get("new_items", 0),
+                        "jev_rejected": dig_stats.get("jev_rejected", 0),
+                        "judge_rejected": dig_stats.get("judge_rejected", 0),
+                        "provider_failed": bool(
+                            dig_stats.get("provider_failed")
+                        ),
                     }
                 if dig_items:
                     normalized = _normalize_score_dedupe(
@@ -4206,9 +4246,14 @@ def _run_supplemental_searches(
                         for item in normalized:
                             if item.url:
                                 existing_urls.add(item.url)
+                        rejected = (
+                            dig_stats.get("jev_rejected", 0)
+                            + dig_stats.get("judge_rejected", 0)
+                        )
                         print(
                             f"[X dig] {dig_stats.get('queries_run', 0)} follow-up "
-                            f"queries surfaced {len(normalized)} new posts",
+                            f"queries surfaced {len(normalized)} new posts"
+                            + (f" ({rejected} rejected as off-topic)" if rejected else ""),
                             file=sys.stderr,
                         )
             except Exception as exc:
@@ -4415,6 +4460,184 @@ def _run_supplemental_searches(
                             weight=0.3,
                         )
                     )
+
+
+def _dig_lanes(config: dict[str, Any]) -> set[str] | None:
+    """Which lanes the iterative dig may drive; None means all diggable lanes."""
+    raw = str(config.get("LAST30DAYS_X_DIG_SOURCES") or "").strip()
+    if not raw:
+        return None
+    return {s.strip().lower() for s in raw.split(",") if s.strip()}
+
+
+def _run_multi_source_dig(
+    *,
+    topic: str,
+    bundle: schema.RetrievalBundle,
+    plan: schema.QueryPlan,
+    config: dict[str, Any],
+    depth: str,
+    date_range: tuple[str, str],
+    web_backend: str,
+    available: list[str],
+    mock: bool,
+) -> None:
+    """LLM-steered dig over the non-X lanes (Hacker News + web).
+
+    Same planner + Jev loop as the X dig: the planner reviews what each lane
+    already surfaced, fires broad follow-up queries, and Jev relevance-
+    classifies every candidate so broad retrieval stays safe. HN digs are
+    free (Algolia is keyless); each web dig query is one backend call.
+    Dig-approved items carry jev_score, which exempts them from the keyword
+    relevance floors and the fusion pool cap downstream.
+    """
+    if mock:
+        return
+    try:
+        dig_rounds = int(config.get("_x_dig_rounds") or 0)
+    except (TypeError, ValueError):
+        dig_rounds = 0
+    if dig_rounds <= 0:
+        return
+    lanes = _dig_lanes(config)
+    from . import x_research
+
+    from_date, to_date = date_range
+    ranking_query = plan.subqueries[0].ranking_query if plan.subqueries else topic
+    tried = [sq.search_query for sq in plan.subqueries if sq.search_query]
+
+    def _search_hn(query: str) -> dict:
+        result = hackernews.search_algolia(query, from_date, to_date)
+        if result.get("error") and not result.get("hits"):
+            return {"items": [], "error": result["error"]}
+        # query="" skips the title keyword post-filter in the parser — broad
+        # dig queries would otherwise be re-ANDed against titles before Jev
+        # gets to judge them.
+        return {"items": hackernews.parse_hackernews_response(result, query="")}
+
+    def _search_web(query: str) -> dict:
+        try:
+            items, artifact = grounding.web_search(
+                query, date_range, config, backend=web_backend)
+        except Exception as exc:
+            return {"items": [], "error": str(exc)}
+        error = artifact.get("error") if isinstance(artifact, dict) else None
+        return {"items": items or [], "error": error}
+
+    lane_defs: list[tuple[str, str, Any]] = []
+    if (lanes is None or "hackernews" in lanes) and "hackernews" in available:
+        lane_defs.append(("hackernews", "hn-dig", _search_hn))
+    if (lanes is None or "grounding" in lanes) and "grounding" in available:
+        lane_defs.append(("grounding", "web-dig", _search_web))
+    if not lane_defs:
+        return
+
+    existing_urls = {
+        item.url
+        for items in bundle.items_by_source.values()
+        for item in items
+        if item.url
+    }
+    ledger = x_research.Ledger(config)
+    # Cross-lane seed corpus: initial items from every source plus each
+    # lane's dig finds as they land — later lanes mine earlier discoveries.
+    seed_corpus = [
+        {
+            "title": it.title or "",
+            "text": it.body or it.snippet or "",
+            "author": it.author or "",
+        }
+        for items in bundle.items_by_source.values()
+        for it in items
+    ]
+
+    for source, label, search_fn in lane_defs:
+        interim = [
+            {
+                "id": it.item_id,
+                "title": it.title or "",
+                "text": it.body or "",
+                "author": it.author or "",
+                "url": it.url or "",
+            }
+            for it in bundle.items_by_source.get(source, [])
+        ]
+        try:
+            dig_items, dig_warnings, dig_stats = x_research.dig_source(
+                source,
+                ranking_query or topic,
+                interim,
+                tried,
+                search_fn=search_fn,
+                rounds=dig_rounds,
+                ledger=ledger,
+                seed_items=seed_corpus,
+            )
+        except Exception as exc:
+            print(f"[{label}] dig failed: {exc}", file=sys.stderr)
+            continue
+        for warn in dig_warnings:
+            print(f"[{label}] {warn}", file=sys.stderr)
+        if dig_stats.get("queries_run"):
+            bundle.artifacts.setdefault("dig", {})[source] = {
+                "rounds": dig_stats.get("rounds_run", 0),
+                "queries": dig_stats.get("queries_run", 0),
+                "new_items": dig_stats.get("new_items", 0),
+                "jev_rejected": dig_stats.get("jev_rejected", 0),
+                "judge_rejected": dig_stats.get("judge_rejected", 0),
+                "provider_failed": bool(dig_stats.get("provider_failed")),
+            }
+        for it in dig_items:
+            if isinstance(it, dict):
+                seed_corpus.append(
+                    {
+                        "title": str(it.get("title") or ""),
+                        "text": str(
+                            it.get("text") or it.get("body")
+                            or it.get("snippet") or ""
+                        ),
+                        "author": str(
+                            it.get("author") or it.get("author_handle") or ""
+                        ),
+                    }
+                )
+        if not dig_items:
+            continue
+        normalized = _normalize_score_dedupe(
+            source,
+            dig_items,
+            from_date,
+            to_date,
+            freshness_mode=plan.freshness_mode,
+            ranking_query=ranking_query,
+        )
+        normalized = [item for item in normalized if item.url not in existing_urls]
+        if not normalized:
+            continue
+        if not any(sq.label == label for sq in plan.subqueries):
+            plan.subqueries.append(
+                schema.SubQuery(
+                    label=label,
+                    search_query=topic,
+                    ranking_query=ranking_query,
+                    sources=[source],
+                    weight=0.9,
+                )
+            )
+        bundle.add_items(label, source, normalized)
+        for item in normalized:
+            if item.url:
+                existing_urls.add(item.url)
+        rejected = (
+            dig_stats.get("jev_rejected", 0)
+            + dig_stats.get("judge_rejected", 0)
+        )
+        print(
+            f"[{label}] {dig_stats.get('queries_run', 0)} follow-up queries "
+            f"surfaced {len(normalized)} new items"
+            + (f" ({rejected} rejected as off-topic)" if rejected else ""),
+            file=sys.stderr,
+        )
 
 
 def _retry_thin_sources(

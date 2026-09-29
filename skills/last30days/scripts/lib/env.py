@@ -707,10 +707,19 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         # call budget (0 disables the budget, not the latch).
         ('LAST30DAYS_X_DIG_ROUNDS', None),
         ('LAST30DAYS_X_DIG_QUERIES', None),
+        ('LAST30DAYS_X_DIG_JEV', None),
+        ('LAST30DAYS_X_DIG_JUDGE', None),
+        ('LAST30DAYS_X_DIG_SOURCES', None),
+        ('LAST30DAYS_X_DIG_SEEDS', None),
+        ('LAST30DAYS_MAX_X_CALLS', None),
         ('LAST30DAYS_X_LEDGER', None),
         ('LAST30DAYS_X_LEDGER_MAX_QUERIES', None),
         ('LAST30DAYS_X_LEDGER_MAX_IDS', None),
         ('LAST30DAYS_GETXAPI_DAILY_BUDGET', None),
+        # Dig provider retry budget: extra attempts on transient failures
+        # and the exponential-backoff base seconds.
+        ('DISCOVERY_PROVIDER_RETRIES', None),
+        ('DISCOVERY_PROVIDER_BACKOFF', None),
         # youtube_yt reads this lazily from os.environ; default android is
         # applied there when the key is absent. Empty disables.
         ('LAST30DAYS_YT_PLAYER_CLIENT', None),
@@ -766,10 +775,17 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
         'LAST30DAYS_GETXAPI_MAX_PAGES',
         'LAST30DAYS_X_DIG_ROUNDS',
         'LAST30DAYS_X_DIG_QUERIES',
+        'LAST30DAYS_X_DIG_JEV',
+        'LAST30DAYS_X_DIG_JUDGE',
+        'LAST30DAYS_X_DIG_SOURCES',
+        'LAST30DAYS_X_DIG_SEEDS',
+        'LAST30DAYS_MAX_X_CALLS',
         'LAST30DAYS_X_LEDGER',
         'LAST30DAYS_X_LEDGER_MAX_QUERIES',
         'LAST30DAYS_X_LEDGER_MAX_IDS',
         'LAST30DAYS_GETXAPI_DAILY_BUDGET',
+        'DISCOVERY_PROVIDER_RETRIES',
+        'DISCOVERY_PROVIDER_BACKOFF',
     ):
         value = config.get(key)
         # Empty LAST30DAYS_YT_PLAYER_CLIENT is a valid disable; other knobs

@@ -791,6 +791,16 @@ def prune_fallback_entity_misses(
         if _is_corpus_candidate(candidate):
             kept.append(candidate)
             continue
+        # Jev-classified candidates were judged on-topic by a stronger judge
+        # than the entity-token heuristic — don't drop them for a title that
+        # merely omits the entity name.
+        if any(
+            si.metadata.get("jev_score") is not None
+            or si.metadata.get("jev_unclassified")
+            for si in candidate.source_items
+        ):
+            kept.append(candidate)
+            continue
         if candidate.local_relevance >= FALLBACK_ENTITY_MISS_CONFIDENCE_ESCAPE:
             kept.append(candidate)
             continue

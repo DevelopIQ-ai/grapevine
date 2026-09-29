@@ -594,3 +594,76 @@ class FusionEnrichedCopyTests(unittest.TestCase):
         self.assertIs(out[0], bare)
         self.assertEqual(3, len(out[0].metadata["top_comments"]))
         self.assertIs(out[1], other)
+
+
+class TestJevPoolProtection(unittest.TestCase):
+    """Jev-classified dig candidates bypass the pool cap."""
+
+    def _plan(self) -> schema.QueryPlan:
+        return schema.QueryPlan(
+            intent="breaking_news",
+            freshness_mode="strict_recent",
+            cluster_mode="story",
+            raw_topic="test",
+            subqueries=[
+                schema.SubQuery(
+                    label="primary",
+                    search_query="test",
+                    ranking_query="test",
+                    sources=["x"],
+                    weight=1.0,
+                ),
+                schema.SubQuery(
+                    label="x-dig",
+                    search_query="test dig",
+                    ranking_query="test",
+                    sources=["x"],
+                    weight=0.5,
+                ),
+            ],
+            source_weights={"x": 1.0},
+        )
+
+    def test_jev_scored_items_survive_pool_cutoff(self):
+        plan = self._plan()
+        top = [
+            make_item(f"top_{i}", "x", f"https://x.com/t/{i}",
+                      f"top {i}", 0.95)
+            for i in range(5)
+        ]
+        dig_item = make_item("dig_1", "x", "https://x.com/d/1",
+                             "dig find", 0.01)
+        dig_item.metadata["jev_score"] = 0.85
+        streams = {
+            ("primary", "x"): top,
+            ("x-dig", "x"): [dig_item],
+        }
+        candidates = fusion.weighted_rrf(streams, plan, pool_limit=3)
+        urls = {c.url for c in candidates}
+        self.assertIn("https://x.com/d/1", urls)
+        # Unprotected items are still capped at pool_limit
+        unprotected = [
+            c for c in candidates
+            if not any(
+                si.metadata.get("jev_score") is not None
+                for si in c.source_items
+            )
+        ]
+        self.assertLessEqual(len(unprotected), 3)
+
+    def test_unscored_items_still_cut(self):
+        plan = self._plan()
+        top = [
+            make_item(f"top_{i}", "x", f"https://x.com/t/{i}",
+                      f"top {i}", 0.9)
+            for i in range(6)
+        ]
+        unscored = make_item("dig_1", "x", "https://x.com/d/1",
+                             "dig find", 0.01)
+        streams = {
+            ("primary", "x"): top,
+            ("x-dig", "x"): [unscored],
+        }
+        candidates = fusion.weighted_rrf(streams, plan, pool_limit=3)
+        urls = {c.url for c in candidates}
+        self.assertNotIn("https://x.com/d/1", urls)

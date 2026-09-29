@@ -1,0 +1,48 @@
+{
+  "name": "sandbox-launches-sep-2026",
+  "topic": "sandbox provider launches last week",
+  "from_date": "2026-09-20",
+  "to_date": "2026-09-28",
+  "args": ["--deep", "--x-dig", "3"],
+  "intent": "news",
+  "freshness_mode": "strict_recent",
+  "cluster_mode": "none",
+  "subqueries": [
+    {
+      "label": "sandbox-launches",
+      "search_query": "\"sandbox\" launch OR launching OR launched agents",
+      "ranking_query": "announcements of new AI agent sandbox products or sandbox providers launching (code execution sandboxes, microVMs, agent runtimes)",
+      "sources": ["x", "web", "hackernews"],
+      "weight": 1.0
+    },
+    {
+      "label": "named-providers",
+      "search_query": "Daytona OR E2B OR Blaxel OR Runloop OR \"Vercel Sandbox\" OR \"Cloudflare Sandbox\" OR Modal sandbox",
+      "ranking_query": "news, launches, or product announcements from named agent sandbox providers",
+      "sources": ["x", "web", "hackernews"],
+      "weight": 0.9
+    },
+    {
+      "label": "sandbox-shipped",
+      "search_query": "\"sandbox\" shipped OR announcing OR \"now available\" agent",
+      "ranking_query": "product ship announcements for agent sandboxes or secure code execution environments",
+      "sources": ["x", "web"],
+      "weight": 0.8
+    }
+  ],
+  "expected": [
+    {"label": "Prime Sandboxes GA", "match": "introducing prime sandboxes"},
+    {"label": "Docker Cloud Sandboxes", "match": "docker cloud sandbox"},
+    {"label": "Docker OCI sandbox spec", "match": "sbx"},
+    {"label": "DigitalOcean Managed Agents", "match": "managed agents"},
+    {"label": "Edera k8s sandboxes", "match": "edera"},
+    {"label": "Substrate runtime", "match": "substrate"},
+    {"label": "DeepSeek Elastic Compute", "match": "elastic compute"},
+    {"label": "Brig (Show HN)", "match": "49802729"},
+    {"label": "Drop sandbox", "match": "droprun"},
+    {"label": "DiscoBox", "match": "discobox"},
+    {"label": "Augur macOS sandbox", "match": "augur"},
+    {"label": "Panic Room", "match": "panic room"},
+    {"label": "OpenRouter for Sandboxes", "match": "openrouter"}
+  ]
+}

@@ -72,84 +72,6 @@ metadata:
       - clawhub
 ---
 
-## Iterative find mode with Jev (DevelopIQ fork)
-
-**Route explicit `/last30days find <objective>` requests here before the normal
-one-pass flow below.** Also use this route when the user explicitly requests repeated
-searching and Jev evaluation against filters. Ordinary topic research retains the
-existing one-pass behavior. Do not confuse this with `last30days.py --discover`, which
-is the upstream topic-brief workflow. Do not run the normal research pass first.
-
-1. Preserve the user's objective and filters. Translate source/date/minimum-engagement
-   filters to deterministic flags and semantic requirements to repeatable `--include`
-   and `--exclude`; `--language` is also judged by Jev. Do not invent tighter filters or
-   weaken them to manufacture matches. There are at most six semantic filters including
-   language, in addition to the objective.
-2. Resolve `scripts/discover.py` relative to this installed skill, alongside
-   `scripts/last30days.py`. The discovery entrypoint owns planning, retrieval, Jev
-   evaluation, feedback, deduplication, completion decisions, and checkpointing; the host need not
-   manually emulate the loop or generate a one-pass `--plan`.
-3. Run with a checkpoint path. Default sources are `x,reddit,hackernews`; supported
-   selections also include `youtube,github,bluesky`. Defaults: 30 days and three
-   queries per round. There are no automatic total match, round, call, search, time,
-   empty-round, or dollar limits. The planner decides when coverage is sufficient
-   and additional searches are unlikely to produce new unique matches. Repeated
-   queries are skipped and returned as feedback so it can change direction or stop.
-   `--request-timeout 60` bounds each planner/Jev operation; `--search-timeout 180`
-   bounds one engine invocation. Neither sets a total runtime limit. Provider costs
-   continue until planner completion, user cancellation, or an operational failure.
-4. Return accepted matches with source links and the actual stop reason, plus counts
-   of uncertain/pending candidates and any source failures. Link the checkpoint.
-   For `planner_complete`, report the planner's completion reason and coverage
-   summary. Do not describe cancellation or operational failure as completion.
-   Never claim the planner proved exhaustive coverage, or that uncertain matches
-   satisfy the request. A Jev probability is model output, not independently
-   verified accuracy. Empty/garbled evidence is uncertain, not proof that the
-   underlying document fails the criteria.
-5. For an explicit continuation, use `--resume <checkpoint>`; preserve the original
-   criteria, fixed date window, and search history. Version 1 checkpoints are
-   rejected explicitly; start a new run rather than restoring legacy stop limits.
-
-Example user request:
-
-```text
-/last30days find developers who tried an AI coding tool and want an alternative;
-only firsthand problems, exclude self-promotion, English, X and Reddit
-```
-
-Translate to this **engine scripting form**, using the installed script's real path:
-
-```bash
-python3 scripts/discover.py \
-  "Developers who tried an AI coding tool and want an alternative" \
-  --sources x,reddit --include "Describes a problem they personally experienced" \
-  --exclude "Promotes their own product" --language English \
-  --output ./discovery-results.json
-```
-
-The command emits compact output by default; `--emit json` exposes full state. Source
-statuses and per-candidate decisions/probabilities remain in the atomic checkpoint.
-`--accept-threshold 0.8`, `--reject-threshold 0.2`, and `--evidence-threshold 0.8`
-control acceptance; every criterion must pass and evidence must be sufficient.
-`--min-engagement` counts likes/score/points/GitHub stars only, with unknown values failing a
-positive minimum. Recorded call counts are activity metrics, **not** comprehensive
-provider costs or a spending cap.
-
-A separate planner model needs `DISCOVERY_PLANNER_API_KEY`, `AI_GATEWAY_API_KEY`, or
-`OPENAI_API_KEY`. Jev needs `JEV_API_KEY` (or `TYPESAFE_API_KEY`) for native TypeSafe;
-for Gateway use `JEV_PROVIDER=vercel` and `JEV_API_KEY` or `AI_GATEWAY_API_KEY`.
-Provider variables are process environment configuration. Never print credentials.
-If configuration is missing, report the missing provider setup rather than substituting
-host guesses for real Jev evaluation. Retrieval uses existing source credentials and
-disables browser-cookie reads. The wrapper sets `LAST30DAYS_GETXAPI_EXACT_QUERY=1`
-to preserve generated query refinements; embedded date operators still yield to the
-fixed engine date window. The wrapper also sets `LAST30DAYS_SKIP_RUN_CACHE=1`
-to preserve the ordinary shared last-run/report cache across its subqueries.
-GetXAPI retains full provider text; the wrapper records
-any truncation at its 24,000-character candidate-body cap. No Trigger, Supabase, or
-hosted worker is required.
-See `CONFIGURATION.md` in this fork for all flags and provider override defaults.
-
 ## GetXAPI backend (DevelopIQ fork)
 
 When the user has a GetXAPI key, use the `GETXAPI_KEY` environment variable or
@@ -162,13 +84,22 @@ upstream defaults (ten requests; `LAST30DAYS_GETXAPI_MAX_PAGES` overrides), so
 GetXAPI spend is roughly 2x the upstream lane but still cents per run. When a
 run surfaces a breakout post, handle, or subtheme, prefer a second engine pass
 with chase subqueries over widening the first plan — iteration beats breadth.
-For "dig deep / find everything" asks on X, pass `--x-dig` (or `--x-dig N` for
-N rounds): after the first retrieval a planner reviews interim hits and issues
-follow-up GetXAPI queries that chase what surfaced — alternate phrasings, named
-entities, and `from:`/`@` lanes for recurring voices — merged under an `x-dig`
-subquery label. Deep runs get 2 dig rounds by default; it needs a planner key
-(`AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and silently skips when absent.
-`LAST30DAYS_X_DIG_QUERIES` tunes follow-ups per round (default 3).
+For "dig deep / find everything" asks, pass `--x-dig` (or `--x-dig N`):
+each round a planner reviews interim hits and fires follow-ups on X
+(`from:`/`@` lanes), Hacker News (keyless Algolia), and the web
+backend, plus seed queries mined across lanes (recurring names, topic
+proper names, `from:` author seeds on X; `LAST30DAYS_X_DIG_SEEDS` 3).
+Results merge under `x-dig`/`hn-dig`/`web-dig`; deep runs dig 2 rounds
+by default and need a planner key (`AI_GATEWAY_API_KEY`/`OPENAI_API_KEY`).
+`LAST30DAYS_X_DIG_SOURCES` narrows lanes and
+`LAST30DAYS_X_DIG_QUERIES` retunes follow-ups. Every item is Jev-classified
+(`LAST30DAYS_X_DIG_JEV=0` off), then a second Judge scores survivors
+0-100 and drops <50 (`LAST30DAYS_X_DIG_JUDGE=0` off,
+`DISCOVERY_JUDGE_*` retargets; calls retry w/ backoff, then fail hard).
+Judged items skip the lexical floor and pool cap, carrying `jev_score`/
+`judge_score` in metadata. **Effort:** `--effort low|normal|high|ultra`
+= `--quick`/default/`--deep`/max fan-out. **Spend:** `--max-calls N`/
+`LAST30DAYS_MAX_X_CALLS` caps run GetXAPI calls; at cap X lanes stop.
 Every GetXAPI call shares a daily call budget (`LAST30DAYS_GETXAPI_DAILY_BUDGET`,
 default 800) plus a five-minute latch after any provider 429, and a cross-run
 ledger at `~/.config/last30days/x-research-ledger.json` flags re-surfaced posts

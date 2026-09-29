@@ -147,6 +147,42 @@ def search_hackernews(
     return response
 
 
+def search_algolia(
+    query: str,
+    from_date: str,
+    to_date: str,
+    *,
+    hits_per_page: int = 80,
+) -> Dict[str, Any]:
+    """Raw Algolia story search used by the dig loop.
+
+    Unlike search_hackernews this takes the planner's query verbatim — no
+    core-subject extraction and, critically, no points floor: dig retrieves
+    broadly and a downstream classifier judges relevance, so a low-engagement
+    Show HN launch must not be filtered out here.
+    """
+    from urllib.parse import urlencode
+
+    from_ts = _date_to_unix(from_date)
+    to_ts = _date_to_unix(to_date) + 86400
+    flat = _flatten_query_for_algolia(query)
+    params = {
+        "query": flat,
+        "tags": "story",
+        "numericFilters": f"created_at_i>{from_ts},created_at_i<{to_ts}",
+        "hitsPerPage": str(hits_per_page),
+    }
+    tokens = flat.split()
+    if len(tokens) > 1:
+        params["optionalWords"] = " ".join(tokens[1:])
+    url = f"{ALGOLIA_SEARCH_URL}?{urlencode(params)}"
+    try:
+        return http.request("GET", url, timeout=30)
+    except Exception as e:
+        _log(f"Algolia dig search failed: {e}")
+        return {"hits": [], "error": str(e)}
+
+
 def fetch_discovery_listings(
     from_date: str,
     to_date: str,

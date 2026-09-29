@@ -16,11 +16,12 @@ import os
 import re
 import tempfile
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from . import env
+from . import entity_extract, env
 
 # ---------------------------------------------------------------------------
 # Daily capacity gate (getx-daily-usage-gate.ts port)
@@ -103,11 +104,17 @@ class DailyGate:
     latch window short-circuits instead of spending against a saturated key.
     """
 
+    # Per-process call counter shared by every gate instance in the run —
+    # getxapi constructs a fresh gate per call site, so the run cap cannot
+    # live on any one instance or in the day-scoped state file.
+    _run_calls: int = 0
+
     def __init__(self, environ=None):
         env_map = os.environ if environ is None else environ
         state_dir = _state_dir()
         self._path = state_dir / GATE_FILE if state_dir else None
         self._budget = _env_int("LAST30DAYS_GETXAPI_DAILY_BUDGET", DEFAULT_DAILY_BUDGET)
+        self._max_run = _env_int("LAST30DAYS_MAX_X_CALLS", 0)
         self._state: dict[str, Any] = {}
         if self._path:
             self._state = _read_json(self._path)
@@ -125,6 +132,8 @@ class DailyGate:
 
     def check(self) -> str | None:
         """Return a block reason, or None when a call may proceed."""
+        if self._max_run > 0 and type(self)._run_calls >= self._max_run:
+            return f"run call cap reached ({self._max_run} calls this run)"
         if self._path is None:
             return None
         retry_until = self._state.get("retry_until")
@@ -140,6 +149,7 @@ class DailyGate:
 
     def charge(self) -> None:
         """Record one GetXAPI HTTP call."""
+        type(self)._run_calls += 1
         if self._path is None:
             return
         day = self._day()
@@ -290,16 +300,61 @@ def _digest_items(items: list[dict]) -> list[dict]:
     for item in items[-MAX_DIGEST_ITEMS:]:
         if not isinstance(item, dict):
             continue
+        text = (
+            item.get("text") or item.get("body")
+            or item.get("title") or item.get("snippet") or ""
+        )
         digest.append(
             {
-                "text": str(item.get("text") or item.get("body") or "")[:MAX_DIGEST_TEXT],
+                "text": str(text)[:MAX_DIGEST_TEXT],
                 "author": str(item.get("author_handle") or item.get("author") or ""),
-                "url": str(item.get("url") or ""),
+                "url": str(item.get("url") or item.get("hn_url") or ""),
                 "likes": (item.get("engagement") or {}).get("likes"),
                 "previously_seen": bool(item.get("previously_seen")),
             }
         )
     return digest
+
+
+_X_CONTEXT_NOTE = (
+    "Iterative X dig: queries run through GetXAPI advanced search "
+    "(Latest and Top lanes). Every retrieved post is scored for "
+    "relevance by a downstream classifier, so favor broad retrieval "
+    "— single terms, product/vendor names, category words — over "
+    "multi-keyword constructions; search engines AND terms, and a "
+    "missing synonym means a total miss. Good pivots: bare entity or "
+    "product names, alternate phrasings, sub-events, or "
+    "from:handle / @handle lanes for recurring voices. X search "
+    "supports from:, @handle, \"exact phrase\", and plain keywords; "
+    "since:/until: dates are applied by the engine."
+)
+
+_LANE_LABELS = {
+    "x": "X/Twitter posts",
+    "hackernews": "Hacker News stories",
+    "grounding": "web pages",
+}
+
+_LANE_CONTEXT_NOTES = {
+    "hackernews": (
+        "Iterative dig: queries run through the Hacker News Algolia stories "
+        "index. Every retrieved story is scored for relevance by a "
+        "downstream classifier, so favor broad retrieval — single terms, "
+        "product/vendor names, category words — over multi-keyword "
+        "constructions; Algolia ANDs leading terms, and a missing synonym "
+        "means a total miss. Good pivots: bare product or project names, "
+        "'Show HN'-style launch phrasings, alternate terms for the same "
+        "thing. No operators — plain keywords only."
+    ),
+    "grounding": (
+        "Iterative dig: queries run through a web search backend. Every "
+        "retrieved page is scored for relevance by a downstream classifier, "
+        "so favor broad retrieval — single terms, product/vendor names, "
+        "category words — over long keyword strings. Good pivots: bare "
+        "product or company names, alternate phrasings, official domains, "
+        "launch/announcement phrasings."
+    ),
+}
 
 
 def _dig_feedback(
@@ -309,6 +364,7 @@ def _dig_feedback(
     round_no: int,
     previous_assessment: str | None,
     queries_requested: int,
+    context_note: str | None = None,
 ) -> dict:
     return {
         "queries": tried[-100:],
@@ -318,15 +374,288 @@ def _dig_feedback(
         "queries_requested": queries_requested,
         "previous_assessment": previous_assessment,
         "rounds": [{"number": i + 1} for i in range(round_no)],
-        "context_note": (
-            "Iterative X dig: queries run through GetXAPI advanced search "
-            "(Latest and Top lanes). Suggest pivots that surface posts the "
-            "existing queries missed — alternate phrasings, sub-events, named "
-            "entities, or from:handle / @handle lanes for recurring voices. "
-            "X search supports from:, @handle, \"exact phrase\", and plain "
-            "keywords; since:/until: dates are applied by the engine."
-        ),
+        "context_note": context_note or _X_CONTEXT_NOTE,
     }
+
+
+def _item_dedupe_keys(item: dict) -> tuple[str, str]:
+    """(id, url) dedupe keys; works for X posts and HN/web items alike."""
+    return (
+        str(item.get("post_id") or item.get("id") or ""),
+        str(item.get("url") or item.get("hn_url") or ""),
+    )
+
+
+# Capitalized runs in titles/text: "Prime Sandboxes", "Docker", "Edera".
+_PROPER_RUN = re.compile(
+    r"[A-Z][A-Za-z0-9.&'+-]*(?:[ \t]+[A-Z][A-Za-z0-9.&'+-]*){0,3}"
+)
+
+# Title-cased junk that survives capital-run mining but names nothing.
+_SEED_STOP = frozenset({
+    "show hn", "ask hn", "tell hn", "hn", "show", "ask", "the", "part",
+    "new", "vs", "why", "how", "what", "when", "launch", "launched",
+    "launching", "announcing", "introducing", "meet", "open source",
+})
+
+# How many mined seed queries each dig round fires before the planner adds
+# its own. LAST30DAYS_X_DIG_SEEDS overrides; 0 disables seeding.
+DIG_SEEDS_PER_ROUND = 3
+
+
+def _seed_queries(
+    topic: str,
+    items: list[dict],
+    tried_norm: set,
+    *,
+    max_seeds: int,
+    author_prefix: str | None = None,
+) -> list[str]:
+    """Deterministic broad queries mined from the corpus so far.
+
+    The planner's phrasing is a luck surface — a run can miss a whole vendor
+    because nobody typed its name. Seeds remove the luck: every round, the
+    most frequent capitalized phrases in retrieved titles/text plus the
+    topic's own proper names become bare queries, deduped against everything
+    already tried. Jev+judge keep the noise cheap. When ``author_prefix``
+    is set (``from:`` on X), recurring authors get account-scoped seeds — a
+    from:lane catches a launch announcement regardless of wording.
+    """
+    if max_seeds <= 0:
+        return []
+    counts: Counter[str] = Counter()
+    authors: Counter[str] = Counter()
+    for it in items[-400:]:
+        if not isinstance(it, dict):
+            continue
+        text = " ".join(
+            str(it.get(field) or "")
+            for field in ("title", "text", "body", "snippet")
+        )[:400]
+        for match in _PROPER_RUN.finditer(text):
+            phrase = " ".join(match.group(0).split()).strip(".,:;!?-")
+            if (
+                len(phrase) < 4
+                or phrase.lower() in _SEED_STOP
+                or all(
+                    w.lower() in entity_extract.ENTITY_STOPWORDS
+                    for w in phrase.split()
+                )
+            ):
+                continue
+            counts[phrase] += 1
+        if author_prefix:
+            handle = str(
+                it.get("author_handle") or it.get("author") or ""
+            ).strip().lstrip("@")
+            if 2 <= len(handle) <= 30 and " " not in handle:
+                authors[handle] += 1
+    seeds: list[str] = []
+
+    def _take(phrase: str) -> bool:
+        if normalize_query(phrase) not in tried_norm and phrase not in seeds:
+            seeds.append(phrase)
+            return True
+        return False
+
+    # Recurring voices get a reserved budget — an account-scoped query catches
+    # an announcement no matter the wording, and phrase seeds shouldn't crowd
+    # them out.
+    if author_prefix:
+        author_budget = min(2, max_seeds)
+        for handle, _ in authors.most_common(10):
+            if author_budget <= 0:
+                break
+            if _take(f"{author_prefix}{handle}"):
+                author_budget -= 1
+    # Recurring names in hits — strongest novelty signal.
+    for phrase, _ in counts.most_common(20):
+        if len(seeds) >= max_seeds:
+            break
+        _take(phrase)
+    # Then the topic's own proper names as a guaranteed floor.
+    for match in _PROPER_RUN.finditer(topic):
+        if len(seeds) >= max_seeds:
+            break
+        phrase = " ".join(match.group(0).split()).strip(".,:;!?-")
+        if len(phrase) >= 4 and phrase.lower() not in _SEED_STOP:
+            _take(phrase)
+    return seeds[:max_seeds]
+
+
+def dig_source(
+    lane: str,
+    topic: str,
+    interim_items: list[dict],
+    tried_queries: list[str],
+    *,
+    search_fn,
+    rounds: int,
+    environ=None,
+    gate: "DailyGate | None" = None,
+    ledger: "Ledger | None" = None,
+    timeout: int = 60,
+    context_note: str | None = None,
+    seed_items: list[dict] | None = None,
+) -> tuple[list[dict], list[str], dict]:
+    """LLM-steered iterative dig over any search lane.
+
+    Each round the discovery Planner reviews the interim corpus and emits
+    follow-up queries (or declares coverage complete). ``search_fn(query)``
+    executes one query against the lane's backend and returns a dict with
+    ``items`` and optional ``error``. Every batch is relevance-classified by
+    Jev when configured (broad queries stay safe because weak hits are
+    dropped, not kept). Returns ``(new_items, warnings, stats)``; new items
+    exclude ids/urls already in ``interim_items``.
+    """
+    from . import discovery_providers
+
+    warnings: list[str] = []
+    stats = {"rounds_run": 0, "queries_run": 0, "new_items": 0,
+             "jev_rejected": 0, "judge_rejected": 0}
+    if rounds <= 0 or search_fn is None:
+        return [], warnings, stats
+    env_map = os.environ if environ is None else environ
+    label = _LANE_LABELS.get(lane, lane)
+    try:
+        planner = discovery_providers.Planner(environ)
+    except discovery_providers.ProviderError as exc:
+        warnings.append(f"{label} dig skipped: {exc}")
+        return [], warnings, stats
+
+    jev = None
+    if str(env_map.get("LAST30DAYS_X_DIG_JEV") or "1") != "0":
+        try:
+            jev = discovery_providers.Jev(environ)
+        except discovery_providers.ProviderError:
+            jev = None
+
+    # Second-stage verdict: whatever Jev kept gets a finer keep/drop + score
+    # from a small chat model. Disabled with LAST30DAYS_X_DIG_JUDGE=0.
+    judge = None
+    if str(env_map.get("LAST30DAYS_X_DIG_JUDGE") or "1") != "0":
+        try:
+            judge = discovery_providers.Judge(environ)
+        except discovery_providers.ProviderError:
+            judge = None
+
+    objective = (
+        f"{label} relevant to: {topic}. Surface posts that the queries "
+        "already tried did not reach — broad single-term and entity-name "
+        "queries are safe because every candidate is relevance-classified "
+        "downstream; keyword stuffing hides posts whose wording differs."
+    )
+    filters = {"source": lane}
+    seen_ids = set()
+    seen_urls = set()
+    for i in interim_items:
+        if isinstance(i, dict):
+            pid, url = _item_dedupe_keys(i)
+            if pid:
+                seen_ids.add(pid)
+            if url:
+                seen_urls.add(url)
+    tried = list(tried_queries)
+    tried_norm = {normalize_query(q) for q in tried}
+    queries_per_round = max(
+        1, _map_int(env_map, "LAST30DAYS_X_DIG_QUERIES", DIG_QUERIES_PER_ROUND)
+    )
+    seeds_per_round = max(
+        0, _map_int(env_map, "LAST30DAYS_X_DIG_SEEDS", DIG_SEEDS_PER_ROUND)
+    )
+    new_items: list[dict] = []
+    previous_assessment = None
+
+    for round_no in range(rounds):
+        blocked = gate.check() if gate else None
+        if blocked:
+            warnings.append(f"{label} dig stopped: {blocked}")
+            break
+        produced = False
+        round_items: list[dict] = []
+
+        def _run_query(query: str) -> None:
+            nonlocal produced
+            if normalize_query(query) in tried_norm:
+                return
+            tried_norm.add(normalize_query(query))
+            tried.append(query)
+            stats["queries_run"] += 1
+            try:
+                result = search_fn(query)
+            except Exception as exc:
+                warnings.append(f"{label} dig query {query!r}: {exc}")
+                return
+            if result.get("error") and not result.get("items"):
+                warnings.append(f"{label} dig query {query!r}: {result['error']}")
+                return
+            produced = True
+            ledger_key = f"{lane}:{query}"
+            known = ledger.seen_ids(ledger_key) if ledger else set()
+            if ledger:
+                ledger.record_query_run(ledger_key)
+            found_ids: list[str] = []
+            for item in result.get("items") or []:
+                pid, url = _item_dedupe_keys(item)
+                if (pid and pid in seen_ids) or (url and url in seen_urls):
+                    continue
+                if pid:
+                    seen_ids.add(pid)
+                    found_ids.append(pid)
+                if url:
+                    seen_urls.add(url)
+                if pid and pid in known:
+                    item["previously_seen"] = True
+                item["dig_round"] = round_no + 1
+                round_items.append(item)
+            if ledger and found_ids:
+                ledger.record_page(ledger_key, lane, found_ids, None, False)
+
+        # Deterministic coverage floor: entity phrases mined from this
+        # lane's hits, the shared cross-lane corpus, and fresh dig finds —
+        # an entity surfacing on HN seeds an X query too.
+        for query in _seed_queries(
+            topic,
+            interim_items + list(seed_items or []) + new_items,
+            tried_norm,
+            max_seeds=seeds_per_round,
+            author_prefix="from:" if lane == "x" else None,
+        ):
+            _run_query(query)
+
+        try:
+            decision = planner.plan(
+                objective, filters,
+                _dig_feedback(topic, tried, interim_items + new_items,
+                              round_no, previous_assessment,
+                              queries_per_round,
+                              context_note=context_note
+                              or _LANE_CONTEXT_NOTES.get(lane)),
+                timeout,
+            )
+        except discovery_providers.ProviderError as exc:
+            stats["provider_failed"] = True
+            warnings.append(f"{label} dig planner failed after retries: {exc}")
+            break
+        previous_assessment = decision.get("coverage_summary")
+        stats["rounds_run"] = round_no + 1
+        if decision.get("action") == "search":
+            for query in (decision.get("queries") or [])[:queries_per_round]:
+                _run_query(query)
+        if not produced:
+            # Nothing new this round — planner stop, all-repeats, or all
+            # queries failed. Either way the trail is cold.
+            break
+        new_items.extend(_judge_round(
+            _classify_round(round_items, jev, objective, stats, warnings,
+                            timeout),
+            judge, objective, stats, warnings, timeout,
+        ))
+        if stats.get("provider_failed"):
+            warnings.append(f"{label} dig stopped: provider failure")
+            break
+    stats["new_items"] = len(new_items)
+    return new_items, warnings, stats
 
 
 def dig(
@@ -343,6 +672,7 @@ def dig(
     gate: "DailyGate | None" = None,
     ledger: "Ledger | None" = None,
     timeout: int = 60,
+    seed_items: list[dict] | None = None,
 ) -> tuple[list[dict], list[str], dict]:
     """LLM-steered iterative dig over GetXAPI.
 
@@ -352,91 +682,123 @@ def dig(
     ``(new_items, warnings, stats)``; new items exclude post ids already in
     ``interim_items``.
     """
-    from . import discovery_providers, getxapi
+    from . import getxapi
 
-    warnings: list[str] = []
-    stats = {"rounds_run": 0, "queries_run": 0, "new_items": 0}
-    if rounds <= 0 or not token:
-        return [], warnings, stats
-    try:
-        planner = discovery_providers.Planner(environ)
-    except discovery_providers.ProviderError as exc:
-        warnings.append(f"X dig skipped: {exc}")
-        return [], warnings, stats
+    if not token:
+        return [], [], {"rounds_run": 0, "queries_run": 0, "new_items": 0,
+                        "jev_rejected": 0, "judge_rejected": 0}
 
-    objective = (
-        f"X/Twitter posts relevant to: {topic}. Surface posts that the queries "
-        "already tried did not reach — alternate phrasings, specific sub-topics, "
-        "named entities, or from:handle/@handle lanes for voices that recur."
+    def _search(query: str) -> dict:
+        return getxapi.search_exact(
+            query, from_date, to_date, depth=depth, token=token,
+            gate=gate, ledger=ledger,
+        )
+
+    return dig_source(
+        "x", topic, interim_items, tried_queries,
+        search_fn=_search, rounds=rounds, environ=environ, gate=gate,
+        timeout=timeout, seed_items=seed_items,
     )
-    filters = {"source": "x", "from": from_date, "to": to_date}
-    seen_post_ids = {
-        str(i.get("post_id") or "")
-        for i in interim_items
-        if isinstance(i, dict) and i.get("post_id")
-    }
-    seen_urls = {
-        str(i.get("url") or "")
-        for i in interim_items
-        if isinstance(i, dict) and i.get("url")
-    }
-    tried = list(tried_queries)
-    tried_norm = {normalize_query(q) for q in tried}
-    env_map = os.environ if environ is None else environ
-    queries_per_round = max(
-        1, _map_int(env_map, "LAST30DAYS_X_DIG_QUERIES", DIG_QUERIES_PER_ROUND)
-    )
-    new_items: list[dict] = []
-    previous_assessment = None
 
-    for round_no in range(rounds):
-        blocked = gate.check() if gate else None
-        if blocked:
-            warnings.append(f"X dig stopped: GetXAPI {blocked}")
-            break
+
+# Jev reject/evidence bands, mirroring discovery.py's defaults.
+JEV_REJECT = 0.2
+JEV_EVIDENCE = 0.8
+# Candidate text sent to Jev per classify call — the dominant input-token cost.
+JEV_TEXT_CHARS = 800
+
+
+def _classify_round(items, jev, objective, stats, warnings, timeout):
+    """Relevance-classify one dig round; rejected candidates are dropped.
+
+    Broad queries only stay safe because this filter exists. Fail-open on
+    provider errors: an unclassifiable batch is kept rather than silently
+    emptied.
+    """
+    if not jev or not items:
+        return items
+    from . import discovery_providers
+    kept = []
+    for idx, item in enumerate(items):
+        text = "\n".join(
+            part for part in [
+                str(item.get("title") or "").strip(),
+                str(
+                    item.get("text") or item.get("body")
+                    or item.get("snippet") or ""
+                ).strip(),
+            ] if part
+        )
         try:
-            decision = planner.plan(
-                objective, filters,
-                _dig_feedback(topic, tried, interim_items + new_items,
-                              round_no, previous_assessment,
-                              queries_per_round),
-                timeout,
-            )
+            judgement = jev.classify(objective, [objective], {
+                "text": text[:JEV_TEXT_CHARS],
+            }, timeout)
         except discovery_providers.ProviderError as exc:
-            warnings.append(f"X dig planner failed: {exc}")
-            break
-        previous_assessment = decision.get("coverage_summary")
-        stats["rounds_run"] = round_no + 1
-        if decision.get("action") != "search":
-            break
-        produced = False
-        for query in (decision.get("queries") or [])[:queries_per_round]:
-            if normalize_query(query) in tried_norm:
-                continue
-            tried_norm.add(normalize_query(query))
-            tried.append(query)
-            stats["queries_run"] += 1
-            result = getxapi.search_exact(
-                query, from_date, to_date, depth=depth, token=token,
-                gate=gate, ledger=ledger,
+            stats["provider_failed"] = True
+            warnings.append(
+                f"Dig classifier failed after retries: {exc}"
+                " (keeping remaining items unclassified)"
             )
-            if result.get("error") and not result.get("items"):
-                warnings.append(f"X dig query {query!r}: {result['error']}")
-                continue
-            produced = True
-            for item in result.get("items") or []:
-                pid = str(item.get("post_id") or "")
-                url = str(item.get("url") or "")
-                if (pid and pid in seen_post_ids) or (url and url in seen_urls):
-                    continue
-                if pid:
-                    seen_post_ids.add(pid)
-                if url:
-                    seen_urls.add(url)
-                item["dig_round"] = round_no + 1
-                new_items.append(item)
-        if not produced:
-            # Planner asked for queries but all were repeats — treat as done.
+            for remaining in items[idx:]:
+                remaining["jev_unclassified"] = True
+                kept.append(remaining)
             break
-    stats["new_items"] = len(new_items)
-    return new_items, warnings, stats
+        score = judgement["probabilities"].get("c0", 0.0)
+        sufficient = judgement.get("evidence_sufficient", 0.0)
+        item["jev_score"] = round(score, 3)
+        if sufficient >= JEV_EVIDENCE and score <= JEV_REJECT:
+            stats["jev_rejected"] += 1
+            continue
+        kept.append(item)
+    return kept
+
+
+# Judge verdicts below this band drop the item — the coarse filter already
+# passed, so a low score means thin/duplicate/spam signal, not just off-topic.
+JUDGE_DROP_BELOW = 50
+
+
+def _judge_round(items, judge, objective, stats, warnings, timeout):
+    """Second-stage verdict on one round's Jev survivors; <50 drops.
+
+    Fail-open like the classifier: a judge outage keeps the batch rather
+    than silently emptying it.
+    """
+    if not judge or not items:
+        return items
+    from . import discovery_providers
+    kept = []
+    for start in range(0, len(items), judge.MAX_CANDIDATES):
+        chunk = items[start:start + judge.MAX_CANDIDATES]
+        candidates = [
+            {
+                "i": offset,
+                "title": str(item.get("title") or ""),
+                "text": str(
+                    item.get("text") or item.get("body")
+                    or item.get("snippet") or ""
+                )[:1200],
+            }
+            for offset, item in enumerate(chunk)
+        ]
+        try:
+            scores = judge.judge(objective, candidates, timeout)
+        except discovery_providers.ProviderError as exc:
+            stats["provider_failed"] = True
+            warnings.append(
+                f"Dig judge failed after retries: {exc}"
+                " (keeping remaining items unjudged)"
+            )
+            kept.extend(items[start:])
+            break
+        for offset, item in enumerate(chunk):
+            score = scores.get(offset)
+            if score is None:
+                kept.append(item)
+                continue
+            item["judge_score"] = score
+            if score < JUDGE_DROP_BELOW:
+                stats["judge_rejected"] += 1
+                continue
+            kept.append(item)
+    return kept

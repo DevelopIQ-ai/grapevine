@@ -1,0 +1,1 @@
+Remove the standalone `discover.py` / `/last30days find` entrypoint and `lib/discovery.py`: the in-pipeline `--x-dig` loop now covers iterative Jev-driven research (cross-lane digging, ledger memory, spend gates, retries) at a fraction of the per-candidate token cost. The shared providers (`lib/discovery_providers.py`) are unaffected.

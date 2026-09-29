@@ -23,6 +23,9 @@ def _isolated_state_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("LAST30DAYS_X_LEDGER_MAX_QUERIES", raising=False)
     monkeypatch.delenv("LAST30DAYS_X_LEDGER_MAX_IDS", raising=False)
     monkeypatch.delenv("LAST30DAYS_X_DIG_QUERIES", raising=False)
+    # Dig tests swap in fake classifiers explicitly; keep Jev off by default
+    # so a stray real API key in the environment can't trigger network calls.
+    monkeypatch.setenv("LAST30DAYS_X_DIG_JEV", "0")
     yield
 
 
@@ -56,6 +59,18 @@ def test_gate_budget_blocks(tmp_path, monkeypatch):
     gate.charge()
     gate.charge()
     assert gate.check() == "daily budget reached (2 calls/day)"
+
+
+def test_gate_run_cap_blocks_across_instances(tmp_path, monkeypatch):
+    x_research.DailyGate._run_calls = 0
+    monkeypatch.setenv("LAST30DAYS_MAX_X_CALLS", "2")
+    gate = x_research.DailyGate()
+    gate.charge()
+    gate.charge()
+    assert gate.check() == "run call cap reached (2 calls this run)"
+    # getxapi builds a fresh gate per call site; the cap must still hold.
+    assert x_research.DailyGate().check() == "run call cap reached (2 calls this run)"
+    x_research.DailyGate._run_calls = 0
 
 
 def test_gate_latch_blocks_until_retry_window(tmp_path):
@@ -210,6 +225,7 @@ class FakePlanner:
 
 
 def test_dig_runs_followups_and_dedupes(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_DIG_SEEDS", "0")
     interim = [{"post_id": "1", "text": "hit", "url": "https://x.com/a/status/1",
                 "author_handle": "a"}]
     monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
@@ -246,6 +262,7 @@ def test_dig_queries_per_round_from_env(tmp_path, monkeypatch):
                     "coverage_summary": "covered", "queries": [], "usage": {}}
 
     monkeypatch.setenv("LAST30DAYS_X_DIG_QUERIES", "2")
+    monkeypatch.setenv("LAST30DAYS_X_DIG_SEEDS", "0")
     monkeypatch.setattr(discovery_providers, "Planner", ManyQueriesPlanner)
     dig_page = {"items": [{"post_id": "9", "url": "https://x.com/b/9",
                            "text": "new"}]}
@@ -257,6 +274,64 @@ def test_dig_queries_per_round_from_env(tmp_path, monkeypatch):
         )
     assert stats["queries_run"] == 2  # 4 offered, capped at env knob
     assert mock.call_count == 2
+
+
+def test_dig_jev_classifies_and_drops_irrelevant(tmp_path, monkeypatch):
+    class FakeJev:
+        def __init__(self, environ=None):
+            pass
+
+        def classify(self, objective, criteria, candidate, timeout):
+            text = candidate.get("text", "")
+            relevant = "on-topic" in text
+            return {"probabilities": {"c0": 0.9 if relevant else 0.05},
+                    "evidence_sufficient": 0.9, "usage": {}, "model": "fake"}
+
+    monkeypatch.setenv("LAST30DAYS_X_DIG_JEV", "1")
+    monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
+    monkeypatch.setattr(discovery_providers, "Jev", FakeJev)
+    dig_page = {"items": [
+        {"post_id": "9", "url": "https://x.com/b/9", "text": "on-topic new"},
+        {"post_id": "8", "url": "https://x.com/c/8", "text": "crypto spam"},
+    ]}
+    with patch.object(getxapi, "search_exact", return_value=dig_page):
+        items, warnings, stats = x_research.dig(
+            "AI agents", [], ["AI agents"],
+            from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+            token="dummy", rounds=2,
+        )
+    assert stats["jev_rejected"] == 1
+    assert [i["post_id"] for i in items] == ["9"]
+    assert items[0]["jev_score"] == 0.9
+    assert warnings == []
+
+
+def test_dig_jev_fail_open_on_provider_error(tmp_path, monkeypatch):
+    class BrokenJev:
+        def __init__(self, environ=None):
+            pass
+
+        def classify(self, objective, criteria, candidate, timeout):
+            raise discovery_providers.ProviderError("down")
+
+    monkeypatch.setenv("LAST30DAYS_X_DIG_JEV", "1")
+    monkeypatch.setattr(discovery_providers, "Planner", FakePlanner)
+    monkeypatch.setattr(discovery_providers, "Jev", BrokenJev)
+    dig_page = {"items": [
+        {"post_id": "9", "url": "https://x.com/b/9", "text": "new"},
+        {"post_id": "8", "url": "https://x.com/c/8", "text": "also new"},
+    ]}
+    with patch.object(getxapi, "search_exact", return_value=dig_page):
+        items, warnings, stats = x_research.dig(
+            "AI agents", [], ["AI agents"],
+            from_date="2026-08-19", to_date="2026-09-19", depth="deep",
+            token="dummy", rounds=1,
+        )
+    # both new items kept when the classifier is down (post ids dedupe across
+    # the round's two queries, so 2 unique items reach the classifier)
+    assert stats["new_items"] == 2
+    assert stats["provider_failed"] is True
+    assert any("classifier failed after retries" in w for w in warnings)
 
 
 def test_dig_stops_on_gate(tmp_path, monkeypatch):
@@ -282,3 +357,204 @@ def test_dig_without_planner_key(tmp_path, monkeypatch):
     )
     assert items == [] and stats["queries_run"] == 0
     assert warnings and "skipped" in warnings[0]
+
+
+# ---------------------------------------------------------------------------
+# dig_source — the generalized loop driving non-X lanes (HN, web)
+# ---------------------------------------------------------------------------
+
+
+class TwoRoundPlanner:
+    """Round 1: two broad queries. Round 2: stop."""
+
+    def __init__(self, environ=None):
+        self.calls = 0
+        self.feedback_notes = []
+
+    def plan(self, objective, filters, feedback, timeout):
+        self.calls += 1
+        self.feedback_notes.append(feedback.get("context_note") or "")
+        if self.calls == 1:
+            return {"action": "search", "reason": "chase",
+                    "coverage_summary": "needs more",
+                    "queries": ["substrate", "show hn sandboxes"], "usage": {}}
+        return {"action": "stop", "reason": "done",
+                "coverage_summary": "covered", "queries": [], "usage": {}}
+
+
+def _hn_items():
+    return [
+        {"id": "hn1", "title": "Show HN: Substrate", "url": "https://s.io",
+         "hn_url": "https://news.ycombinator.com/item?id=hn1",
+         "author": "bob", "engagement": {"points": 4}},
+        {"id": "hn2", "title": "Show HN: DiscoBox", "url": "https://d.io",
+         "hn_url": "https://news.ycombinator.com/item?id=hn2",
+         "author": "cat", "engagement": {"points": 2}},
+    ]
+
+
+def test_dig_source_runs_queries_dedupes_and_tags_round(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAST30DAYS_X_DIG_SEEDS", "0")
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    interim = [{"id": "hn1", "url": "https://s.io"}]
+    calls = []
+
+    def search(query):
+        calls.append(query)
+        return {"items": _hn_items()}
+
+    items, warnings, stats = x_research.dig_source(
+        "hackernews", "sandbox launches", interim, ["sandbox"],
+        search_fn=search, rounds=3,
+    )
+    assert stats["rounds_run"] == 2 and stats["queries_run"] == 2
+    # hn1 deduped against interim; hn2 kept with dig_round stamped.
+    assert [i["id"] for i in items] == ["hn2"]
+    assert items[0]["dig_round"] == 1
+    assert warnings == []
+
+
+def test_dig_source_hn_context_note_not_x(tmp_path, monkeypatch):
+    planner = TwoRoundPlanner()
+    monkeypatch.setattr(discovery_providers, "Planner",
+                        lambda environ=None: planner)
+    items, _, _ = x_research.dig_source(
+        "hackernews", "sandbox launches", [], [],
+        search_fn=lambda q: {"items": _hn_items()}, rounds=1,
+    )
+    assert items
+    assert planner.feedback_notes and "Algolia" in planner.feedback_notes[0]
+
+
+def test_dig_source_jev_drops_off_topic(tmp_path, monkeypatch):
+    class FakeJev:
+        def __init__(self, environ=None):
+            pass
+
+        def classify(self, objective, criteria, item, timeout):
+            drop = "unrelated" in item["text"].lower()
+            return {"probabilities": {"c0": 0.1 if drop else 0.9},
+                    "evidence_sufficient": 0.9}
+
+    monkeypatch.delenv("LAST30DAYS_X_DIG_JEV", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    monkeypatch.setattr(discovery_providers, "Jev", FakeJev)
+    items, warnings, stats = x_research.dig_source(
+        "grounding", "sandbox launches", [], [],
+        search_fn=lambda q: {"items": [
+            {"id": "w1", "title": "Substrate sandbox runtime",
+             "url": "https://a.io"},
+            {"id": "w2", "title": "unrelated cooking blog",
+             "url": "https://b.io"},
+        ]},
+        rounds=1,
+    )
+    assert [i["id"] for i in items] == ["w1"]
+    assert items[0]["jev_score"] == 0.9
+    assert stats["jev_rejected"] >= 1
+
+
+def test_dig_source_seeds_mine_entity_names(tmp_path, monkeypatch):
+    monkeypatch.delenv("LAST30DAYS_X_DIG_SEEDS", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    interim = [
+        {"id": "a", "title": "Prime Sandboxes goes GA", "url": "https://p.io"},
+        {"id": "b", "title": "Prime Sandboxes vs Edera compared",
+         "url": "https://e.io"},
+    ]
+    calls = []
+
+    def search(query):
+        calls.append(query)
+        return {"items": []}
+
+    x_research.dig_source(
+        "hackernews", "sandbox launches", interim, ["sandbox"],
+        search_fn=search, rounds=1,
+    )
+    # "Prime Sandboxes" recurs across interim hits -> deterministic seed query,
+    # independent of what the planner chose to ask.
+    assert "Prime Sandboxes" in calls
+
+
+def test_dig_source_seeds_cross_lane_corpus_and_authors(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("LAST30DAYS_X_DIG_SEEDS", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    calls = []
+
+    def search(query):
+        calls.append(query)
+        return {"items": []}
+
+    # Entity only present in the shared cross-lane corpus still seeds.
+    x_research.dig_source(
+        "hackernews", "sandbox launches", [], ["sandbox"],
+        search_fn=search, rounds=1,
+        seed_items=[
+            {"title": "Prime Sandboxes GA", "text": "", "author": ""},
+            {"title": "Prime Sandboxes docs", "text": "", "author": ""},
+        ],
+    )
+    assert "Prime Sandboxes" in calls
+
+    calls.clear()
+    # X lane also seeds from: queries for recurring voices in the corpus.
+    x_research.dig_source(
+        "x", "sandbox launches", [], ["sandbox"],
+        search_fn=search, rounds=1,
+        seed_items=[
+            {"author_handle": "PrimeIntellect", "text": "a"},
+            {"author_handle": "PrimeIntellect", "text": "b"},
+        ],
+    )
+    assert "from:PrimeIntellect" in calls
+
+
+def test_dig_source_judge_drops_low_scores(tmp_path, monkeypatch):
+    class FakeJudge:
+        MAX_CANDIDATES = 40
+
+        def __init__(self, environ=None):
+            pass
+
+        def judge(self, objective, candidates, timeout):
+            return {
+                c["i"]: 90 if "substrate" in (c["title"] + c["text"]).lower() else 10
+                for c in candidates
+            }
+
+    monkeypatch.delenv("LAST30DAYS_X_DIG_JUDGE", raising=False)
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    monkeypatch.setattr(discovery_providers, "Judge", FakeJudge)
+    items, warnings, stats = x_research.dig_source(
+        "grounding", "sandbox launches", [], [],
+        search_fn=lambda q: {"items": [
+            {"id": "w1", "title": "Substrate sandbox runtime",
+             "url": "https://a.io"},
+            {"id": "w2", "title": "celebrity gossip",
+             "url": "https://b.io"},
+        ]},
+        rounds=1,
+    )
+    assert [i["id"] for i in items] == ["w1"]
+    assert items[0]["judge_score"] == 90
+    assert stats["judge_rejected"] == 1
+
+
+def test_dig_source_ledger_marks_previously_seen(tmp_path, monkeypatch):
+    monkeypatch.setattr(discovery_providers, "Planner", TwoRoundPlanner)
+    ledger = x_research.Ledger({})
+    search = lambda q: {"items": _hn_items()}
+    first, _, _ = x_research.dig_source(
+        "hackernews", "sandboxes", [], [], search_fn=search,
+        rounds=1, ledger=ledger,
+    )
+    assert not any(i.get("previously_seen") for i in first)
+    # Second run, fresh interim: same ids re-fetched are flagged.
+    second, _, _ = x_research.dig_source(
+        "hackernews", "sandboxes", [], [], search_fn=search,
+        rounds=1, ledger=ledger,
+    )
+    assert second and all(i.get("previously_seen") for i in second)

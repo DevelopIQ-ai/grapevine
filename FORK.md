@@ -1,7 +1,8 @@
 # Last 30 Days + GetXAPI + Jev
 
 This fork of [Matt Van Horn’s Last 30 Days](https://github.com/mvanhorn/last30days-skill)
-adds GetXAPI as an X search backend and an iterative discovery loop with Jev.
+adds GetXAPI as an X search backend and an LLM-steered dig loop with Jev
+relevance classification inside the ordinary research pass.
 It keeps the original one-pass skill and other sources.
 No Pixie application, database, or job infrastructure is required.
 
@@ -28,49 +29,31 @@ a bounded budget, deduplicate posts, and preserve partial results on failures.
 Requests use GetXAPI credits. Without an explicit backend pin, GetXAPI is the last
 fallback in the ordinary X chain. Existing host-specific policies remain intact.
 
-## Find matches with Jev
+## Dig mode with Jev
 
-```text
-/last30days find developers who tried an AI coding tool and want an alternative;
-only firsthand problems, exclude self-promotion, English
-```
-
-The planner generates queries, the original engine retrieves candidates, and Jev
-checks each candidate against the objective and filters. Decisions feed the next
-round of queries. Matches accumulate without repeatedly judging duplicate URLs.
-GetXAPI receives the planner’s exact query instead of reducing it to topic keywords;
-the engine still enforces the fixed date window. Full provider text is retained
-before the wrapper’s explicit candidate-body cap. Minimum engagement can filter
-likes, scores, points, or GitHub stars.
-Ordinary `/last30days <topic>` still performs the original research pass.
-Discovery sets `LAST30DAYS_SKIP_RUN_CACHE=1` for child engines, preserving the
-shared last-run/report cache used by ordinary research follow-ups.
+For "dig deep / find everything" asks the engine adds `--x-dig N` (2 rounds on
+`--deep`, `--effort ultra` maxes it). After initial retrieval a planner reviews
+the interim corpus and fires follow-up queries on each diggable lane — X via
+GetXAPI (`from:`/`@` chases, broad entity queries), Hacker News via the keyless
+Algolia index, and the web via the configured grounding backend. Deterministic
+seed queries mined from the corpus (recurring names, `from:` author seeds) run
+every round so coverage doesn't depend on planner phrasing. Every retrieved
+item is relevance-classified by Jev before merging; a second-stage Judge then
+scores survivors and drops thin or spammy ones. A cross-run ledger remembers
+every surfaced id so repeat runs accumulate instead of repeating.
 
 Configure native Jev with `JEV_API_KEY` or `TYPESAFE_API_KEY`, or use
 `JEV_PROVIDER=vercel` with `AI_GATEWAY_API_KEY`. A separate general model plans
-queries using `DISCOVERY_PLANNER_API_KEY`, `AI_GATEWAY_API_KEY`, or `OPENAI_API_KEY`.
-Provide discovery model credentials through the process environment; source keys
-retain their existing configuration. Never commit keys.
+queries using `DISCOVERY_PLANNER_API_KEY`, `AI_GATEWAY_API_KEY`, or
+`OPENAI_API_KEY`. Provider calls retry transient failures with exponential
+backoff (`DISCOVERY_PROVIDER_RETRIES`/`DISCOVERY_PROVIDER_BACKOFF`), and a lane
+that still fails marks `provider_failed` and stops rather than degrading
+silently. GetXAPI spend is bounded by `LAST30DAYS_GETXAPI_DAILY_BUDGET` (daily)
+and `--max-calls`/`LAST30DAYS_MAX_X_CALLS` (per run).
 
-The planner decides when the search has covered the objective and further searches
-are unlikely to add unique matches. There are no automatic total match, round,
-request, search, runtime, or empty-round limits, and no dollar cap. Repeated queries
-are skipped and returned as feedback; they do not automatically stop the loop.
-Costs continue until the planner stops, the user cancels, or an operation fails.
-Each planner/Jev operation has a 60-second timeout and each engine invocation a
-180-second timeout; these are operation timeouts, not overall research deadlines.
-
-The checkpoint preserves evidence, probabilities, uncertain and pending work,
-source statuses, criteria, and search history. Successful completion records
-`planner_complete`, a completion reason, and coverage summary. Failures and
-cancellation remain incomplete. Version 1 checkpoints are rejected explicitly
-instead of restoring legacy limits. Insufficient evidence stays uncertain, and
-planner completion does not guarantee exhaustive recall or classification accuracy.
-
-The developer/scripting entrypoint is `skills/last30days/scripts/discover.py`.
-See [the discovery configuration](CONFIGURATION.md#iterative-discovery-with-jev-developiq-fork)
-for flags, thresholds, credentials, and resume behavior. Reinstall the skill after
-updating this fork: installed copies do not automatically track checkout edits.
+See [the dig configuration](CONFIGURATION.md#api-keys-env) for every knob.
+Reinstall the skill after updating this fork: installed copies do not
+automatically track checkout edits.
 
 ## Verification
 

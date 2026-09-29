@@ -254,6 +254,41 @@ class SignalsV3Tests(unittest.TestCase):
         pruned = signals.prune_low_relevance([weak], minimum=0.1)
         self.assertEqual(["weak"], [item.item_id for item in pruned])
 
+    def test_prune_low_relevance_exempts_jev_classified_items(self):
+        jev_passed = schema.SourceItem(
+            item_id="jev",
+            source="x",
+            title="Introducing Prime Sandboxes",
+            body="MicroVM sandboxes purpose-built for RL training.",
+            url="https://x.com/PrimeIntellect/status/1",
+            local_relevance=0.0,
+            metadata={"jev_score": 0.91},
+        )
+        pruned = signals.prune_low_relevance([jev_passed], minimum=0.15)
+        self.assertEqual(["jev"], [item.item_id for item in pruned])
+
+    def test_prune_low_relevance_jev_exemption_mixed_batch(self):
+        jev_passed = schema.SourceItem(
+            item_id="jev",
+            source="x",
+            title="Launch thread",
+            body="Announcing the thing.",
+            url="https://x.com/a/status/1",
+            local_relevance=0.0,
+            metadata={"jev_score": 0.6},
+        )
+        weak = schema.SourceItem(
+            item_id="weak",
+            source="x",
+            title="Unrelated",
+            body="Off topic.",
+            url="https://x.com/b/status/2",
+            local_relevance=0.0,
+            engagement_score=5,
+        )
+        pruned = signals.prune_low_relevance([jev_passed, weak], minimum=0.15)
+        self.assertEqual(["jev"], [item.item_id for item in pruned])
+
     # -- Iteration 1: HN engagement bug --
 
     def test_hackernews_parse_emits_comments_key(self):
