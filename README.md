@@ -1,4 +1,4 @@
-# last30days-pro
+# grapevine
 
 > Fork of [@mvanhorn's /last30days](https://github.com/mvanhorn/last30days-skill) — the exhaustive build: 12 dig lanes (X, HN, news, Reddit, web, GitHub, Bluesky, YouTube, arXiv, Techmeme + whole-window enumeration) with Jev relevance judging on every post. Fork setup and differences: [FORK.md](FORK.md).
 
@@ -14,21 +14,21 @@ English | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](READM
   </a>
 </p>
 
-**The exhaustive social media search engine for AI agents — last30days, but it misses nothing.**
+**The exhaustive social media search engine for AI agents — heard it through the grapevine.**
 
-An AI agent-led search engine scored by upvotes, likes, and real money - not editors. Ask a stock /last30days how many sandbox providers launched last week and it counts 5 of 13: social media has sparse signal, so reading every post is too expensive. last30days-pro retrieves broadly across 12 lanes and lets Jev (~$0.0004/judgment) keep only what's relevant — measured recall 38% → 77%.
+An AI agent-led search engine scored by upvotes, likes, and real money - not editors. Ask a stock /last30days how many sandbox providers launched last week and it counts 5 of 13: social media has sparse signal, so reading every post is too expensive. grapevine retrieves broadly across 12 lanes and lets Jev (~$0.0004/judgment) keep only what's relevant — measured recall 38% → 77%.
 
 This README tracks the current v3 pipeline. The runtime skill spec lives in [skills/last30days/SKILL.md](skills/last30days/SKILL.md), which is the source of truth for the latest command and setup behavior.
 
 **Claude Code (recommended — auto-updates via marketplace):**
 ```
-/plugin marketplace add DevelopIQ-ai/last30days-pro
+/plugin marketplace add DevelopIQ-ai/grapevine
 /plugin install last30days
 ```
 
 **Codex, Cursor, Copilot, Gemini CLI, or any of 50+ [Agent Skills](https://agentskills.io) hosts:**
 ```
-npx skills add DevelopIQ-ai/last30days-pro -g
+npx skills add DevelopIQ-ai/grapevine -g
 ```
 (`-g` installs globally for your user, available across all projects. Drop it to scope per-project.)
 
@@ -157,9 +157,9 @@ The v3 foundations are all still here: the pre-research brain that resolves the 
 
 | Surface | Install | Updates |
 |---------|---------|---------|
-| **Claude Code** (recommended) | `/plugin marketplace add DevelopIQ-ai/last30days-pro` | Auto via marketplace, or `claude plugin update last30days@last30days-skill` |
-| **Grok** (xAI Build CLI) | `grok plugin marketplace add DevelopIQ-ai/last30days-pro` then `grok plugin install last30days` | `grok plugin update last30days` |
-| **Codex, Cursor, Copilot, Gemini CLI, or any of 50+ [Agent Skills](https://agentskills.io) hosts** | `npx skills add DevelopIQ-ai/last30days-pro -g` | `npx skills update last30days -g` |
+| **Claude Code** (recommended) | `/plugin marketplace add DevelopIQ-ai/grapevine` | Auto via marketplace, or `claude plugin update last30days@last30days-skill` |
+| **Grok** (xAI Build CLI) | `grok plugin marketplace add DevelopIQ-ai/grapevine` then `grok plugin install last30days` | `grok plugin update last30days` |
+| **Codex, Cursor, Copilot, Gemini CLI, or any of 50+ [Agent Skills](https://agentskills.io) hosts** | `npx skills add DevelopIQ-ai/grapevine -g` | `npx skills update last30days -g` |
 | **claude.ai** (web) | [Download `last30days.skill`](https://github.com/mvanhorn/last30days-skill/releases/latest/download/last30days.skill) and upload via claude.ai > Customize > Skills > + > Create skill > Upload a skill | Re-download and re-upload |
 | **Claude Desktop** | [Download the `.mcpb` for your platform](https://github.com/mvanhorn/last30days-skill/releases/latest) and drag into Settings > Extensions | Re-download and drag the new bundle in |
 | **OpenClaw** | `clawhub install last30days-official` | `clawhub update last30days-official` |
@@ -167,7 +167,7 @@ The v3 foundations are all still here: the pre-research brain that resolves the 
 ### Claude Code (recommended)
 
 ```
-/plugin marketplace add DevelopIQ-ai/last30days-pro
+/plugin marketplace add DevelopIQ-ai/grapevine
 ```
 
 Recommended because the Claude Code marketplace handles updates for you — the plugin cache is versioned and auto-refreshes when a new release publishes. Run `claude plugin update last30days@last30days-skill` to force a check.
@@ -175,7 +175,7 @@ Recommended because the Claude Code marketplace handles updates for you — the 
 If you'd rather use the agent-skills install path on Claude Code, that's also supported:
 
 ```
-npx skills add DevelopIQ-ai/last30days-pro -g -a claude-code
+npx skills add DevelopIQ-ai/grapevine -g -a claude-code
 ```
 
 ### Quick Try-Link
@@ -189,13 +189,13 @@ The native plugin and the `npx skills` install can coexist. Note that Claude Cod
 [Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces) (`grok`) installs last30days as a native plugin. Direct install tracks the repository:
 
 ```bash
-grok plugin install DevelopIQ-ai/last30days-pro
+grok plugin install DevelopIQ-ai/grapevine
 ```
 
 Or add this repo as a marketplace source, then install by plugin name:
 
 ```bash
-grok plugin marketplace add DevelopIQ-ai/last30days-pro
+grok plugin marketplace add DevelopIQ-ai/grapevine
 grok plugin install last30days
 ```
 
@@ -206,7 +206,7 @@ Add `--trust` to skip the install confirmation. Update with `grok plugin update 
 Install via the open [Agent Skills](https://agentskills.io) CLI — supports 50+ harnesses including `codex`, `cursor`, `github-copilot`, `gemini-cli`, `claude-code`, `windsurf`, `cline`, `continue`, `roo`, `aider-desk`, `opencode`, `goose`, and more (full list on the [vercel-labs/skills repo](https://github.com/vercel-labs/skills)).
 
 ```bash
-npx skills add DevelopIQ-ai/last30days-pro -g
+npx skills add DevelopIQ-ai/grapevine -g
 ```
 
 The `-g` (global) flag installs to your user directory so the skill is available across all projects. Without `-g`, `npx skills` installs project-locally into `./.skills/` (committed with the repo). For a research-the-world tool, global is what you want.
@@ -216,10 +216,10 @@ Codex desktop and other folder-mode hosts can work in ordinary folders as well a
 By default this installs for whichever harness `npx skills` detects. To target a specific one (or multiple):
 
 ```bash
-npx skills add DevelopIQ-ai/last30days-pro -g -a codex
-npx skills add DevelopIQ-ai/last30days-pro -g -a cursor
-npx skills add DevelopIQ-ai/last30days-pro -g -a gemini-cli
-npx skills add DevelopIQ-ai/last30days-pro -g -a codex -a cursor
+npx skills add DevelopIQ-ai/grapevine -g -a codex
+npx skills add DevelopIQ-ai/grapevine -g -a cursor
+npx skills add DevelopIQ-ai/grapevine -g -a gemini-cli
+npx skills add DevelopIQ-ai/grapevine -g -a codex -a cursor
 ```
 
 Update later with:
@@ -277,8 +277,8 @@ optional companion path, not a last30days dependency or endorsement.
 ### Manual (developer)
 
 ```bash
-git clone https://github.com/DevelopIQ-ai/last30days-pro.git
-ln -s "$(pwd)/last30days-pro/skills/last30days" ~/.claude/skills/last30days
+git clone https://github.com/DevelopIQ-ai/grapevine.git
+ln -s "$(pwd)/grapevine/skills/last30days" ~/.claude/skills/last30days
 ```
 
 The symlink keeps the install in sync with your working tree as you edit — no re-copy needed. For `claude.ai`, build the `.skill` file from source: `bash skills/last30days/scripts/build-skill.sh` produces `dist/last30days.skill`.

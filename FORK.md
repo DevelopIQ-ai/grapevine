@@ -9,7 +9,7 @@ No Pixie application, database, or job infrastructure is required.
 ## Install
 
 ```sh
-npx skills add DevelopIQ-ai/last30days-pro -g
+npx skills add DevelopIQ-ai/grapevine -g
 ```
 
 Provide `GETXAPI_KEY` through your environment or private

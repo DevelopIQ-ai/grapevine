@@ -1,1 +1,0 @@
-Repo rebranded to **last30days-pro** — the exhaustive fork of @mvanhorn's /last30days: 12 dig lanes plus whole-window enumeration and Jev relevance judging on every post. README, install commands, and translations retitled accordingly.

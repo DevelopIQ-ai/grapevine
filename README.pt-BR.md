@@ -1,4 +1,4 @@
-# last30days-pro
+# grapevine
 
 > Fork com GetXAPI: veja [configuração e uso](FORK.md).
 
@@ -28,13 +28,13 @@ Este README descreve o pipeline v3 atual. A especificação de execução da ski
 
 **Claude Code (recomendado — atualizações automáticas via marketplace):**
 ```
-/plugin marketplace add DevelopIQ-ai/last30days-pro
+/plugin marketplace add DevelopIQ-ai/grapevine
 /plugin install last30days
 ```
 
 **Codex, Cursor, Copilot, Gemini CLI, ou qualquer um dos 50+ hosts do [Agent Skills](https://agentskills.io):**
 ```
-npx skills add DevelopIQ-ai/last30days-pro -g
+npx skills add DevelopIQ-ai/grapevine -g
 ```
 (`-g` instala globalmente para o seu usuário, então fica disponível em todos os projetos. Omita essa flag se quiser limitar a instalação a um projeto.)
 
@@ -163,9 +163,9 @@ As bases da v3 continuam todas aqui: o cérebro de pré-pesquisa, que identifica
 
 | Ambiente | Instalação | Atualizações |
 |---------|---------|---------|
-| **Claude Code** (recomendado) | `/plugin marketplace add DevelopIQ-ai/last30days-pro` | Automáticas via marketplace, ou `claude plugin update last30days@last30days-skill` |
-| **Grok** (xAI Build CLI) | `grok plugin marketplace add DevelopIQ-ai/last30days-pro` e depois `grok plugin install last30days` | `grok plugin update last30days` |
-| **Codex, Cursor, Copilot, Gemini CLI, ou qualquer um dos 50+ hosts do [Agent Skills](https://agentskills.io)** | `npx skills add DevelopIQ-ai/last30days-pro -g` | `npx skills update last30days -g` |
+| **Claude Code** (recomendado) | `/plugin marketplace add DevelopIQ-ai/grapevine` | Automáticas via marketplace, ou `claude plugin update last30days@last30days-skill` |
+| **Grok** (xAI Build CLI) | `grok plugin marketplace add DevelopIQ-ai/grapevine` e depois `grok plugin install last30days` | `grok plugin update last30days` |
+| **Codex, Cursor, Copilot, Gemini CLI, ou qualquer um dos 50+ hosts do [Agent Skills](https://agentskills.io)** | `npx skills add DevelopIQ-ai/grapevine -g` | `npx skills update last30days -g` |
 | **claude.ai** (web) | [Baixe `last30days.skill`](https://github.com/mvanhorn/last30days-skill/releases/latest/download/last30days.skill) e envie por claude.ai > Customize > Skills > + > Create skill > Upload a skill | Baixar de novo e enviar de novo |
 | **Claude Desktop** | [Baixe o `.mcpb` da sua plataforma](https://github.com/mvanhorn/last30days-skill/releases/latest) e arraste para Settings > Extensions | Baixar de novo e arrastar o novo pacote |
 | **OpenClaw** | `clawhub install last30days-official` | `clawhub update last30days-official` |
@@ -173,7 +173,7 @@ As bases da v3 continuam todas aqui: o cérebro de pré-pesquisa, que identifica
 ### Claude Code (recomendado)
 
 ```
-/plugin marketplace add DevelopIQ-ai/last30days-pro
+/plugin marketplace add DevelopIQ-ai/grapevine
 ```
 
 Recomendado porque o marketplace do Claude Code cuida das atualizações por você: o cache do plugin é versionado e se atualiza sozinho quando sai uma versão nova. Rode `claude plugin update last30days@last30days-skill` para forçar uma verificação.
@@ -181,7 +181,7 @@ Recomendado porque o marketplace do Claude Code cuida das atualizações por voc
 Se preferir usar o caminho de instalação do Agent Skills no Claude Code, ele também é suportado:
 
 ```
-npx skills add DevelopIQ-ai/last30days-pro -g -a claude-code
+npx skills add DevelopIQ-ai/grapevine -g -a claude-code
 ```
 
 ### Link para experimentar rápido
@@ -195,13 +195,13 @@ O plugin nativo e a instalação com `npx skills` podem conviver. Só atenção:
 O [Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces) (`grok`) instala o last30days como plugin nativo. A instalação direta acompanha o repositório:
 
 ```bash
-grok plugin install DevelopIQ-ai/last30days-pro
+grok plugin install DevelopIQ-ai/grapevine
 ```
 
 Ou adicione este repositório como fonte de marketplace e depois instale pelo nome do plugin:
 
 ```bash
-grok plugin marketplace add DevelopIQ-ai/last30days-pro
+grok plugin marketplace add DevelopIQ-ai/grapevine
 grok plugin install last30days
 ```
 
@@ -212,7 +212,7 @@ Acrescente `--trust` para pular a confirmação de instalação. Atualize com `g
 Instale pela CLI aberta do [Agent Skills](https://agentskills.io) — ela suporta 50+ hosts, entre eles `codex`, `cursor`, `github-copilot`, `gemini-cli`, `claude-code`, `windsurf`, `cline`, `continue`, `roo`, `aider-desk`, `opencode`, `goose` e outros (lista completa no [repositório vercel-labs/skills](https://github.com/vercel-labs/skills)).
 
 ```bash
-npx skills add DevelopIQ-ai/last30days-pro -g
+npx skills add DevelopIQ-ai/grapevine -g
 ```
 
 A flag `-g` (global) instala no seu diretório de usuário, então a skill fica disponível em todos os projetos. Sem `-g`, o `npx skills` instala só no projeto, dentro de `./.skills/` (e vai versionado junto com o repositório). Para uma ferramenta feita para pesquisar o mundo inteiro, o que você quer é a instalação global.
@@ -222,10 +222,10 @@ O Codex desktop e outros hosts que trabalham no nível de pasta funcionam tanto 
 Por padrão, a instalação vale para o host que o `npx skills` detectar. Para mirar em um específico (ou em vários):
 
 ```bash
-npx skills add DevelopIQ-ai/last30days-pro -g -a codex
-npx skills add DevelopIQ-ai/last30days-pro -g -a cursor
-npx skills add DevelopIQ-ai/last30days-pro -g -a gemini-cli
-npx skills add DevelopIQ-ai/last30days-pro -g -a codex -a cursor
+npx skills add DevelopIQ-ai/grapevine -g -a codex
+npx skills add DevelopIQ-ai/grapevine -g -a cursor
+npx skills add DevelopIQ-ai/grapevine -g -a gemini-cli
+npx skills add DevelopIQ-ai/grapevine -g -a codex -a cursor
 ```
 
 Para atualizar depois:
