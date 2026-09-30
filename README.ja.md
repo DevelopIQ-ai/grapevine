@@ -1,4 +1,4 @@
-# /last30days
+# last30days-pro
 
 > GetXAPI 対応フォーク：[設定と使い方](FORK.md)。
 
@@ -28,13 +28,13 @@
 
 **Claude Code(推奨 — マーケットプレイス経由で自動更新):**
 ```
-/plugin marketplace add mvanhorn/last30days-skill
+/plugin marketplace add DevelopIQ-ai/last30days-pro
 /plugin install last30days
 ```
 
 **Codex、Cursor、Copilot、Gemini CLI、その他50以上の [Agent Skills](https://agentskills.io) ホスト:**
 ```
-npx skills add mvanhorn/last30days-skill -g
+npx skills add DevelopIQ-ai/last30days-pro -g
 ```
 (`-g` を付けるとユーザー単位でグローバルにインストールされ、すべてのプロジェクトで使えます。プロジェクト単位に限定したい場合はこのフラグを外してください。)
 
@@ -163,9 +163,9 @@ v3 の土台はすべて健在です。APIコールを1件も投げる前に、�
 
 | 環境 | インストール | 更新 |
 |---------|---------|---------|
-| **Claude Code**(推奨) | `/plugin marketplace add mvanhorn/last30days-skill` | マーケットプレイス経由で自動、または `claude plugin update last30days@last30days-skill` |
-| **Grok**(xAI Build CLI) | `grok plugin marketplace add mvanhorn/last30days-skill` のあとに `grok plugin install last30days` | `grok plugin update last30days` |
-| **Codex、Cursor、Copilot、Gemini CLI、その他50以上の [Agent Skills](https://agentskills.io) ホスト** | `npx skills add mvanhorn/last30days-skill -g` | `npx skills update last30days -g` |
+| **Claude Code**(推奨) | `/plugin marketplace add DevelopIQ-ai/last30days-pro` | マーケットプレイス経由で自動、または `claude plugin update last30days@last30days-skill` |
+| **Grok**(xAI Build CLI) | `grok plugin marketplace add DevelopIQ-ai/last30days-pro` のあとに `grok plugin install last30days` | `grok plugin update last30days` |
+| **Codex、Cursor、Copilot、Gemini CLI、その他50以上の [Agent Skills](https://agentskills.io) ホスト** | `npx skills add DevelopIQ-ai/last30days-pro -g` | `npx skills update last30days -g` |
 | **claude.ai**(ウェブ) | [`last30days.skill` をダウンロード](https://github.com/mvanhorn/last30days-skill/releases/latest/download/last30days.skill)し、claude.ai > Customize > Skills > + > Create skill > Upload a skill からアップロード | ダウンロードし直してアップロードし直す |
 | **Claude Desktop** | [お使いのプラットフォーム向けの `.mcpb` をダウンロード](https://github.com/mvanhorn/last30days-skill/releases/latest)し、Settings > Extensions にドラッグ | ダウンロードし直して新しいバンドルをドラッグ |
 | **OpenClaw** | `clawhub install last30days-official` | `clawhub update last30days-official` |
@@ -173,7 +173,7 @@ v3 の土台はすべて健在です。APIコールを1件も投げる前に、�
 ### Claude Code(推奨)
 
 ```
-/plugin marketplace add mvanhorn/last30days-skill
+/plugin marketplace add DevelopIQ-ai/last30days-pro
 ```
 
 Claude Code のマーケットプレイスが更新を代わりにやってくれるため、これが推奨です。プラグインのキャッシュはバージョン管理されていて、新しいリリースが公開されると自動で更新されます。`claude plugin update last30days@last30days-skill` を実行すれば、その場で確認を強制できます。
@@ -181,7 +181,7 @@ Claude Code のマーケットプレイスが更新を代わりにやってく�
 Claude Code で Agent Skills 経由のインストールを使いたい場合も、それはそれで対応しています。
 
 ```
-npx skills add mvanhorn/last30days-skill -g -a claude-code
+npx skills add DevelopIQ-ai/last30days-pro -g -a claude-code
 ```
 
 ### クイック試用リンク
@@ -195,13 +195,13 @@ npx skills add mvanhorn/last30days-skill -g -a claude-code
 [Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces)(`grok`)は last30days をネイティブプラグインとしてインストールします。直接インストールする場合はリポジトリを追跡します。
 
 ```bash
-grok plugin install mvanhorn/last30days-skill
+grok plugin install DevelopIQ-ai/last30days-pro
 ```
 
 あるいは、このリポジトリをマーケットプレイスのソースとして追加してから、プラグイン名でインストールすることもできます。
 
 ```bash
-grok plugin marketplace add mvanhorn/last30days-skill
+grok plugin marketplace add DevelopIQ-ai/last30days-pro
 grok plugin install last30days
 ```
 
@@ -212,7 +212,7 @@ grok plugin install last30days
 オープンな [Agent Skills](https://agentskills.io) の CLI からインストールします。`codex`、`cursor`、`github-copilot`、`gemini-cli`、`claude-code`、`windsurf`、`cline`、`continue`、`roo`、`aider-desk`、`opencode`、`goose` など50以上のホストに対応しています(全一覧は [vercel-labs/skills リポジトリ](https://github.com/vercel-labs/skills)にあります)。
 
 ```bash
-npx skills add mvanhorn/last30days-skill -g
+npx skills add DevelopIQ-ai/last30days-pro -g
 ```
 
 `-g`(グローバル)フラグを付けるとユーザーディレクトリにインストールされ、スキルをすべてのプロジェクトで使えます。`-g` を付けない場合、`npx skills` はプロジェクト内の `./.skills/` にインストールし、リポジトリと一緒にコミットされます。世界中を調べるためのツールなので、通常はグローバルが向いています。
@@ -222,10 +222,10 @@ Codex のデスクトップ版など、フォルダ単位で動くホストは�
 既定では、`npx skills` が検出したホスト向けにインストールされます。特定のホスト(または複数)を指定するには次のようにします。
 
 ```bash
-npx skills add mvanhorn/last30days-skill -g -a codex
-npx skills add mvanhorn/last30days-skill -g -a cursor
-npx skills add mvanhorn/last30days-skill -g -a gemini-cli
-npx skills add mvanhorn/last30days-skill -g -a codex -a cursor
+npx skills add DevelopIQ-ai/last30days-pro -g -a codex
+npx skills add DevelopIQ-ai/last30days-pro -g -a cursor
+npx skills add DevelopIQ-ai/last30days-pro -g -a gemini-cli
+npx skills add DevelopIQ-ai/last30days-pro -g -a codex -a cursor
 ```
 
 あとから更新するには次のようにします。

@@ -1,4 +1,4 @@
-# /last30days
+# last30days-pro
 
 > GetXAPI 分支：参阅[配置与使用](FORK.md)。
 
@@ -29,14 +29,14 @@
 **Claude Code（推荐——通过 marketplace 自动更新）：**
 
 ```
-/plugin marketplace add mvanhorn/last30days-skill
+/plugin marketplace add DevelopIQ-ai/last30days-pro
 /plugin install last30days
 ```
 
 **Codex、Cursor、Copilot、Gemini CLI，或其他 50 多个支持 [Agent Skills](https://agentskills.io) 的宿主：**
 
 ```
-npx skills add mvanhorn/last30days-skill -g
+npx skills add DevelopIQ-ai/last30days-pro -g
 ```
 
 （`-g` 会安装到当前用户的全局环境，所有项目均可使用；去掉该参数则仅安装到当前项目。）
@@ -166,9 +166,9 @@ v3 打下的基础都还在：真正调用 API 前先运行预研究模块，解
 
 | 使用环境 | 安装方式 | 更新方式 |
 |---------|---------|---------|
-| **Claude Code**（推荐） | `/plugin marketplace add mvanhorn/last30days-skill` | 通过 marketplace 自动更新，或运行 `claude plugin update last30days@last30days-skill` |
-| **Grok**（xAI Build CLI） | 先运行 `grok plugin marketplace add mvanhorn/last30days-skill`，再运行 `grok plugin install last30days` | `grok plugin update last30days` |
-| **Codex、Cursor、Copilot、Gemini CLI，或其他 50 多个支持 [Agent Skills](https://agentskills.io) 的宿主** | `npx skills add mvanhorn/last30days-skill -g` | `npx skills update last30days -g` |
+| **Claude Code**（推荐） | `/plugin marketplace add DevelopIQ-ai/last30days-pro` | 通过 marketplace 自动更新，或运行 `claude plugin update last30days@last30days-skill` |
+| **Grok**（xAI Build CLI） | 先运行 `grok plugin marketplace add DevelopIQ-ai/last30days-pro`，再运行 `grok plugin install last30days` | `grok plugin update last30days` |
+| **Codex、Cursor、Copilot、Gemini CLI，或其他 50 多个支持 [Agent Skills](https://agentskills.io) 的宿主** | `npx skills add DevelopIQ-ai/last30days-pro -g` | `npx skills update last30days -g` |
 | **claude.ai**（网页） | [下载 `last30days.skill`](https://github.com/mvanhorn/last30days-skill/releases/latest/download/last30days.skill)，然后在 claude.ai 中依次进入 Customize > Skills > + > Create skill > Upload a skill 上传 | 重新下载并上传 |
 | **Claude Desktop** | 从[最新版本](https://github.com/mvanhorn/last30days-skill/releases/latest)下载适用于你的平台的 `.mcpb`，拖入 Settings > Extensions | 重新下载新包并拖入 |
 | **OpenClaw** | `clawhub install last30days-official` | `clawhub update last30days-official` |
@@ -176,7 +176,7 @@ v3 打下的基础都还在：真正调用 API 前先运行预研究模块，解
 ### Claude Code（推荐）
 
 ```
-/plugin marketplace add mvanhorn/last30days-skill
+/plugin marketplace add DevelopIQ-ai/last30days-pro
 ```
 
 推荐这种方式，是因为 Claude Code marketplace 会替你处理更新：插件缓存按版本管理，每次发布新版本都会自动刷新。要强制检查更新，请运行 `claude plugin update last30days@last30days-skill`。
@@ -184,7 +184,7 @@ v3 打下的基础都还在：真正调用 API 前先运行预研究模块，解
 如果你更愿意在 Claude Code 中使用 Agent Skills 的安装方式，同样支持：
 
 ```
-npx skills add mvanhorn/last30days-skill -g -a claude-code
+npx skills add DevelopIQ-ai/last30days-pro -g -a claude-code
 ```
 
 ### 快速试用链接
@@ -198,13 +198,13 @@ npx skills add mvanhorn/last30days-skill -g -a claude-code
 [Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces)（`grok`）可以将 last30days 安装为原生插件。直接安装会跟踪仓库更新：
 
 ```bash
-grok plugin install mvanhorn/last30days-skill
+grok plugin install DevelopIQ-ai/last30days-pro
 ```
 
 也可以先把本仓库添加为 marketplace 来源，再按插件名安装：
 
 ```bash
-grok plugin marketplace add mvanhorn/last30days-skill
+grok plugin marketplace add DevelopIQ-ai/last30days-pro
 grok plugin install last30days
 ```
 
@@ -215,7 +215,7 @@ grok plugin install last30days
 通过开放的 [Agent Skills](https://agentskills.io) CLI 安装。它支持 50 多种运行环境，包括 `codex`、`cursor`、`github-copilot`、`gemini-cli`、`claude-code`、`windsurf`、`cline`、`continue`、`roo`、`aider-desk`、`opencode`、`goose` 等（完整列表见 [vercel-labs/skills 仓库](https://github.com/vercel-labs/skills)）。
 
 ```bash
-npx skills add mvanhorn/last30days-skill -g
+npx skills add DevelopIQ-ai/last30days-pro -g
 ```
 
 `-g`（全局）参数会把 Skill 安装到用户目录，因此所有项目均可使用。不加 `-g` 时，`npx skills` 会安装到当前项目的 `./.skills/` 中，并随仓库提交。对于一个用于研究整个世界的工具，全局安装通常更合适。
@@ -225,10 +225,10 @@ Codex 桌面版和其他以文件夹为工作区的宿主，不仅能在 Git 仓
 默认情况下，`npx skills` 会安装到它自动检测到的宿主。若要指定一个或多个宿主：
 
 ```bash
-npx skills add mvanhorn/last30days-skill -g -a codex
-npx skills add mvanhorn/last30days-skill -g -a cursor
-npx skills add mvanhorn/last30days-skill -g -a gemini-cli
-npx skills add mvanhorn/last30days-skill -g -a codex -a cursor
+npx skills add DevelopIQ-ai/last30days-pro -g -a codex
+npx skills add DevelopIQ-ai/last30days-pro -g -a cursor
+npx skills add DevelopIQ-ai/last30days-pro -g -a gemini-cli
+npx skills add DevelopIQ-ai/last30days-pro -g -a codex -a cursor
 ```
 
 日后可通过以下命令更新：
