@@ -1245,6 +1245,15 @@ When the user asks "X vs Y" (or "X vs Y vs Z"), the engine fans out N full `pipe
 
 **MANDATORY per-entity resolution.** For each entity, resolve the full Step 0.55 stack (X handle, subreddits, GitHub user/repos, news context). Then assemble a `--competitors-plan` JSON mapping each entity to its targeting, and invoke the engine ONCE with the vs-topic string.
 
+**MANDATORY per-entity query planning.** Perform Step 0.75 for every entity,
+including the main topic, and put each complete 2-4 subquery plan in that entity's
+`query_plan` field of `--competitors-plan`. It has the same schema as `--plan`:
+`intent`, `freshness_mode`, `cluster_mode`, and `subqueries` containing
+`search_query`, `ranking_query`, and `sources`. A main-topic `--plan` is only a
+fallback for the main entity; it never supplies a peer's plan. Pass
+`--agent-rerank` and perform the documented host relevance judgments. After real
+host web searches, set `LAST30DAYS_NATIVE_SEARCH=1`; a flag alone does no searching.
+
 **Output shape per run:**
 - For `--emit=compact` / `--emit=md`, there is no separate merged Markdown raw file. The main topic saves to `{main-slug}-raw.md`; each peer saves to `{peer-slug}-raw.md`.
 - For `--emit=html`, the main saved artifact is the merged comparison HTML at `{main-slug}-vs-{peer-slug}-raw-html[...].html`; each peer may also save its own per-entity HTML artifact.
@@ -1283,8 +1292,9 @@ trap 'rm -f "$COMPETITORS_PLAN_FILE"' EXIT
 # `set -o noclobber` (leaving the plan empty -> deterministic fallback).
 cat >| "$COMPETITORS_PLAN_FILE" <<'PLAN_EOF'
 {
-  "{TOPIC_B}": {"x_handle":"{TOPIC_B_HANDLE}","subreddits":["{TOPIC_B_SUB_1}","{TOPIC_B_SUB_2}"],"github_user":"{TOPIC_B_GH}","context":"{TOPIC_B_CONTEXT}"},
-  "{TOPIC_C}": {"x_handle":"{TOPIC_C_HANDLE}","subreddits":["{TOPIC_C_SUB_1}"],"github_user":"{TOPIC_C_GH}","context":"{TOPIC_C_CONTEXT}"}
+  "{TOPIC_A}": {"query_plan":{"intent":"opinion","freshness_mode":"recent","cluster_mode":"debate","subqueries":[{"search_query":"{TOPIC_A_QUERY_1}","ranking_query":"{TOPIC_A}","sources":["reddit","hackernews"]},{"search_query":"{TOPIC_A_QUERY_2}","ranking_query":"{TOPIC_A}","sources":["reddit","hackernews"]}]}},
+  "{TOPIC_B}": {"query_plan":{"intent":"opinion","freshness_mode":"recent","cluster_mode":"debate","subqueries":[{"search_query":"{TOPIC_B_QUERY_1}","ranking_query":"{TOPIC_B}","sources":["reddit","hackernews"]},{"search_query":"{TOPIC_B_QUERY_2}","ranking_query":"{TOPIC_B}","sources":["reddit","hackernews"]}]},"x_handle":"{TOPIC_B_HANDLE}","subreddits":["{TOPIC_B_SUB_1}","{TOPIC_B_SUB_2}"],"github_user":"{TOPIC_B_GH}","context":"{TOPIC_B_CONTEXT}"},
+  "{TOPIC_C}": {"query_plan":{"intent":"opinion","freshness_mode":"recent","cluster_mode":"debate","subqueries":[{"search_query":"{TOPIC_C_QUERY_1}","ranking_query":"{TOPIC_C}","sources":["reddit","hackernews"]},{"search_query":"{TOPIC_C_QUERY_2}","ranking_query":"{TOPIC_C}","sources":["reddit","hackernews"]}]},"x_handle":"{TOPIC_C_HANDLE}","subreddits":["{TOPIC_C_SUB_1}"],"github_user":"{TOPIC_C_GH}","context":"{TOPIC_C_CONTEXT}"}
 }
 PLAN_EOF
 
@@ -1294,12 +1304,13 @@ PLAN_EOF
   --save-suffix=v3 \
   --x-handle={TOPIC_A_HANDLE} \
   --subreddits={TOPIC_A_SUBS} \
+  --agent-rerank \
   --competitors-plan "$COMPETITORS_PLAN_FILE"
 ```
 
 **Keep the heredoc marker quoted as `'PLAN_EOF'`.** Quoting suppresses shell interpolation so apostrophes, `$`, backticks, etc. pass through verbatim. If you ever switch to an unquoted `<<PLAN_EOF`, every variable reference and apostrophe inside the JSON becomes a parse hazard.
 
-Topic A (the main topic, first in the vs-string) uses outer `--x-handle`, `--x-related`, `--subreddits`, `--github-user`, `--github-repo`, `--trustpilot-domain`, `--tiktok-*`, `--ig-creators` as usual. Topics B and C get their targeting from `--competitors-plan` entries (keyed by entity name, case-insensitive) — the engine does NOT read a main-topic entry out of the plan, so the main topic's Trustpilot domain must ride the outer flag.
+Topic A (the main topic, first in the vs-string) uses outer `--x-handle`, `--x-related`, `--subreddits`, `--github-user`, `--github-repo`, `--trustpilot-domain`, `--tiktok-*`, `--ig-creators` as usual. Topics B and C get their targeting from `--competitors-plan` entries (keyed by entity name, case-insensitive) — the main entry supplies `query_plan`, while main-topic targeting still comes from the outer flags, so the main topic's Trustpilot domain must ride the outer flag.
 
 **Step 0.55 for N entities.** The same pre-research protocol that applies to a single-entity topic applies to EACH entity in a vs-run. For N=3, that means 3 WebSearches for X handles, 3 for subreddits, 3 for GitHub, 3 for news context — or equivalent batched queries. A `## Resolved Entities` block with dashes for any entity means you skipped Step 0.55 for that one. Re-run with a corrected plan.
 

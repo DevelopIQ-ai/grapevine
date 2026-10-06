@@ -905,7 +905,14 @@ For competitor-vs-comparisons that recur, a pre-written JSON skeleton per client
 }
 ```
 
-Pass as `--competitors-plan @client/competitors-plan.json` (or as a string). See `SKILL.md` section "If QUERY_TYPE = COMPARISON" for the full schema.
+For a host-planned comparison without a model API key, include a `query_plan`
+for every entity, including the main topic. Each uses the same validated schema
+as `--plan`: `intent`, `freshness_mode`, `cluster_mode`, and `subqueries` with
+`search_query`, `ranking_query`, and `sources`. An outer `--plan` applies only to
+the main entity and is not reused for competitors. Combine this with
+`--agent-rerank` and real host web search as documented in the skill procedure.
+
+Pass as `--competitors-plan client/competitors-plan.json` (or as a string). See `SKILL.md` section "If QUERY_TYPE = COMPARISON" for the full schema.
 
 ### Grok Bot
 
