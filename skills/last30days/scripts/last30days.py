@@ -1011,7 +1011,7 @@ def parse_competitors_plan(raw: str | None) -> dict[str, dict]:
     known_fields = {
         "x_handle", "x_related", "subreddits",
         "github_user", "github_repos", "trustpilot_domain", "context",
-        "x_posts",
+        "x_posts", "query_plan",
     }
     normalized: dict[str, dict] = {}
     for entity, entry in parsed.items():
@@ -1027,6 +1027,13 @@ def parse_competitors_plan(raw: str | None) -> dict[str, dict]:
                 f"[CompetitorsPlan] Unknown fields in {entity!r}: "
                 f"{sorted(unknown)}; ignoring.\n"
             )
+        if "query_plan" in entry:
+            from lib import planner as plan_validator
+            try:
+                plan_validator.validate_external_plan(entry["query_plan"])
+            except ValueError as exc:
+                sys.stderr.write(f"[CompetitorsPlan] Invalid query_plan for {entity!r}: {exc}\n")
+                raise SystemExit(2)
         normalized[entity.strip().lower()] = {
             **{k: v for k, v in entry.items() if k in known_fields},
             "_name": entity.strip(),
@@ -4126,7 +4133,7 @@ def _main(
                 x_handle=args.x_handle,
                 x_related=x_related,
                 web_backend=args.web_backend,
-                external_plan=external_plan,
+                external_plan=comp_plan.get(topic.strip().lower(), {}).get("query_plan", external_plan),
                 subreddits=subreddits,
                 tiktok_hashtags=tiktok_hashtags,
                 tiktok_creators=tiktok_creators,
@@ -4320,6 +4327,7 @@ def _main(
                     as_of_date=args.as_of_date,
                     hiring_signals_mode=args.hiring_signals,
                     internal_subrun=True,
+                    external_plan=plan_entry.get("query_plan"),
                     save_dir=args.save_dir,
                     corpus_dirs=args.corpus,
                     corpus_all_time=args.corpus_all_time,
